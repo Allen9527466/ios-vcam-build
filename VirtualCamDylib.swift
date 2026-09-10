@@ -2,6 +2,7 @@ import UIKit
 import AVFoundation
 import Foundation
 import ObjectiveC
+import CoreMedia
 
 // dylib加载入口
 @_cdecl("constructor")
@@ -147,7 +148,7 @@ func getVirtualSampleBuffer() -> CMSampleBuffer? {
     }
 
     var formatDesc: CMFormatDescription?
-    let mediaType: FourCharCode = 'vide'
+    let mediaType: FourCharCode = 0x76696465 // 'vide'
     let status = CMFormatDescriptionCreate(
         allocator: kCFAllocatorDefault,
         mediaType: mediaType,
@@ -183,20 +184,16 @@ func getVirtualSampleBuffer() -> CMSampleBuffer? {
     return sb
 }
 
-// MARK: 代理包装器，做异常捕获，防止闪退
+// MARK: 代理包装器【修复重点：移除do-catch，改用guard，避免fatalError编译报错】
 class VirtualCamProxyDelegate: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     weak var originalDelegate: AVCaptureVideoDataOutputSampleBufferDelegate?
 
     func captureOutput(_ output: AVCaptureVideoDataOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        do {
-            if g_virtualVideoName != nil, let virtualBuf = getVirtualSampleBuffer() {
-                originalDelegate?.captureOutput(output, didOutput: virtualBuf, from: connection)
-            } else {
-                originalDelegate?.captureOutput(output, didOutput: sampleBuffer, from: connection)
-            }
-        } catch {
-            print("[VirtualCamDylib] proxy delegate crash guard: \(error)")
-            originalDelegate?.captureOutput(output, didOutput: sampleBuffer, from: connection)
+        guard let del = originalDelegate else { return }
+        if g_virtualVideoName != nil, let virtualBuf = getVirtualSampleBuffer() {
+            del.captureOutput(output, didOutput: virtualBuf, from: connection)
+        } else {
+            del.captureOutput(output, didOutput: sampleBuffer, from: connection)
         }
     }
 }
