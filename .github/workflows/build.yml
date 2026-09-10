@@ -22,19 +22,29 @@ jobs:
         run: |
           xcrun clang -arch arm64 -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -fobjc-arc -c ProxyDelegate.m -o ProxyDelegate_arm64.o
 
-      - name: Compile Swift & link arm64
+      - name: Build arm64 dylib (swiftc link, include objc .o)
         run: |
-          xcrun swiftc -target arm64-apple-ios15.0 -sdk ${{ env.SDK_PATH }} -emit-object VirtualCamDylib.swift -o VirtualCamDylib_arm64.o
-          xcrun clang -arch arm64 -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -dynamiclib -o libVirtualCam_arm64.dylib ProxyDelegate_arm64.o VirtualCamDylib_arm64.o -framework UIKit -framework AVFoundation -framework CoreMedia -framework Foundation
+          xcrun swiftc \
+            -target arm64-apple-ios15.0 \
+            -sdk ${{ env.SDK_PATH }} \
+            -emit-library \
+            -o libVirtualCam_arm64.dylib \
+            VirtualCamDylib.swift ProxyDelegate_arm64.o \
+            -framework UIKit -framework AVFoundation -framework CoreMedia -framework Foundation
 
       - name: Compile ObjC arm64e
         run: |
           xcrun clang -arch arm64e -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -fobjc-arc -c ProxyDelegate.m -o ProxyDelegate_arm64e.o
 
-      - name: Compile Swift & link arm64e
+      - name: Build arm64e dylib (swiftc link, include objc .o)
         run: |
-          xcrun swiftc -target arm64e-apple-ios15.0 -sdk ${{ env.SDK_PATH }} -emit-object VirtualCamDylib.swift -o VirtualCamDylib_arm64e.o
-          xcrun clang -arch arm64e -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -dynamiclib -o libVirtualCam_arm64e.dylib ProxyDelegate_arm64e.o VirtualCamDylib_arm64e.o -framework UIKit -framework AVFoundation -framework CoreMedia -framework Foundation
+          xcrun swiftc \
+            -target arm64e-apple-ios15.0 \
+            -sdk ${{ env.SDK_PATH }} \
+            -emit-library \
+            -o libVirtualCam_arm64e.dylib \
+            VirtualCamDylib.swift ProxyDelegate_arm64e.o \
+            -framework UIKit -framework AVFoundation -framework CoreMedia -framework Foundation
 
       - name: Lipo merge FAT dylib
         run: |
