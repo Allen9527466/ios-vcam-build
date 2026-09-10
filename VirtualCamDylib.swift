@@ -38,19 +38,17 @@ class VirtualCamFloatButton: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: CGRect(x:20, y:250, width: btnSize, height: btnSize))
-        self.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.75)
-        self.layer.cornerRadius = btnSize/2
-        self.layer.shadowColor = UIColor.black.cgColor
-        self.layer.shadowOpacity = 0.25
-        self.layer.shadowRadius = 6
+        backgroundColor = UIColor.systemBlue.withAlphaComponent(0.75)
+        layer.cornerRadius = btnSize/2
+        layer.shadowColor = UIColor.black.cgColor
+        layer.shadowOpacity = 0.25
+        layer.shadowRadius = 6
 
         let tap = UITapGestureRecognizer(target:self, action:#selector(tapSelf))
         addGestureRecognizer(tap)
-
         let pan = UIPanGestureRecognizer(target:self, action:#selector(panHandle(_:)))
         addGestureRecognizer(pan)
     }
-
     required init?(coder: NSCoder) { fatalError("init(coder:)") }
 
     @objc func tapSelf() {
@@ -65,19 +63,18 @@ class VirtualCamFloatButton: UIView {
         case .changed:
             self.center = CGPoint(x: startPoint.x + trans.x, y: startPoint.y + trans.y)
         case .ended, .cancelled:
-            // 松手自动吸附左右边缘
             guard let sup = self.superview else { return }
             let midX = sup.bounds.midX
-            var targetX:CGFloat
+            var targetX: CGFloat
             if self.center.x < midX {
                 targetX = btnSize/2 + 8
-            }else{
+            } else {
                 targetX = sup.bounds.width - btnSize/2 - 8
             }
             UIView.animate(withDuration:0.22) {
                 self.center.x = targetX
             }
-        default:break
+        default: break
         }
     }
 }
@@ -88,7 +85,6 @@ func setupFloatButton() {
                 .filter({$0.activationState == .foregroundActive})
                 .compactMap({$0 as? UIWindowScene}).first,
               let topWin = winScene.windows.first else { return }
-
         if g_floatBtn == nil {
             g_floatBtn = VirtualCamFloatButton()
             topWin.addSubview(g_floatBtn!)
@@ -96,14 +92,13 @@ func setupFloatButton() {
     }
 }
 
-// MARK: 双指长按手势（备用唤出）
+// MARK: 双指长按唤起面板
 func addTwoFingerLongPressGesture() {
     DispatchQueue.main.async {
         guard let winScene = UIApplication.shared.connectedScenes
                 .filter({$0.activationState == .foregroundActive})
                 .compactMap({$0 as? UIWindowScene}).first,
               let topWin = winScene.windows.first else { return }
-
         let longPress = UILongPressGestureRecognizer(target: nil, action:#selector(handleTwoFingerLong(_:)))
         longPress.minimumNumberOfTouches = 2
         longPress.minimumPressDuration = 0.6
@@ -111,13 +106,12 @@ func addTwoFingerLongPressGesture() {
         topWin.addGestureRecognizer(longPress)
     }
 }
-
 @objc func handleTwoFingerLong(_ gesture:UILongPressGestureRecognizer) {
     guard gesture.state == .began else { return }
     g_controlWindow?.toggle()
 }
 
-// MARK: 弹窗提示
+// MARK: 启动提示弹窗
 func showBootToast() {
     DispatchQueue.main.async {
         guard let rootVC = UIApplication.shared.connectedScenes
@@ -132,7 +126,7 @@ func showBootToast() {
     }
 }
 
-// MARK: 弹出控制面板窗口
+// MARK: 控制面板窗口
 class VirtualCamControlWindow: UIWindow {
     private let panel = VirtualCamControlPanel()
     override init(frame: CGRect) {
@@ -208,11 +202,9 @@ class VirtualCamControlPanel: UIView {
             tableView.bottomAnchor.constraint(equalTo:bottomAnchor,constant:-12)
         ])
     }
-
     @objc private func onClose() {
         g_controlWindow?.hide()
     }
-
     func updateUI() {
         tableView.reloadData()
     }
@@ -234,18 +226,14 @@ extension VirtualCamControlPanel: UITableViewDataSource, UITableViewDelegate {
             cell.textLabel?.textColor = .systemBlue
             cell.accessoryType = .none
         case 2:
-            let name = "user_video"
             cell.textLabel?.text = "▶ 相册选中视频.mp4"
-            cell.accessoryType = (g_virtualVideoName == name) ? .checkmark : .none
-            cell.textLabel?.textColor = .label
+            cell.accessoryType = (g_virtualVideoName == "user_video") ? .checkmark : .none
         case 3,4,5,6:
             let idx = indexPath.row - 2
             let name = "video\(idx)"
             cell.textLabel?.text = "▶ \(name).mp4"
             cell.accessoryType = (g_virtualVideoName == name) ? .checkmark : .none
-            cell.textLabel?.textColor = .label
-        default:
-            break
+        default: break
         }
         return cell
     }
@@ -257,70 +245,64 @@ extension VirtualCamControlPanel: UITableViewDataSource, UITableViewDelegate {
             updateUI()
         case 1:
             g_controlWindow?.hide()
-            openPhotoVideoPicker()
+            openVideoPicker()
             return
         case 2:
             enableVirtualCam(videoName: "user_video")
         case 3,4,5,6:
             let idx = indexPath.row - 2
-            let vid = "video\(idx)"
-            enableVirtualCam(videoName: vid)
-        default:
-            break
+            enableVirtualCam(videoName: "video\(idx)")
+        default: break
         }
         updateUI()
         g_controlWindow?.hide()
     }
 }
 
-// MARK: 相册视频选择 PHPicker
-func openPhotoVideoPicker() {
+// MARK: UIImagePicker 相册选视频
+class VideoPickerDelegate: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+    static let shared = VideoPickerDelegate()
+    private override init(){}
+
+    func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+        picker.dismiss(animated:true)
+        guard let videoUrl = info[.mediaURL] as? URL else {
+            print("[VirtualCam] 获取相册视频URL失败")
+            return
+        }
+        let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let destUrl = docDir.appendingPathComponent("user_video.mp4")
+        try? FileManager.default.removeItem(at: destUrl)
+        do {
+            try FileManager.default.copyItem(at: videoUrl, to: destUrl)
+            print("[VirtualCam] 相册视频保存成功 user_video.mp4")
+            DispatchQueue.main.async {
+                enableVirtualCam(videoName:"user_video")
+            }
+        } catch {
+            print("[VirtualCam] 复制视频失败: \(error)")
+        }
+    }
+    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+        picker.dismiss(animated:true)
+    }
+}
+
+func openVideoPicker() {
     DispatchQueue.main.async {
         guard let rootVC = UIApplication.shared.connectedScenes
                 .filter({ $0.activationState == .foregroundActive })
                 .compactMap({ $0 as? UIWindowScene })
                 .first?.windows.first?.rootViewController else { return }
-
-        let pickerConfig = PHPickerConfiguration()
-        pickerConfig.filter = PHPickerFilter.movies
-        pickerConfig.selectionLimit = 1
-        let picker = PHPickerViewController(configuration: pickerConfig)
-        picker.delegate = PhotoPickerDelegate.shared
+        let picker = UIImagePickerController()
+        picker.sourceType = .photoLibrary
+        picker.mediaTypes = [kUTTypeMovie as String]
+        picker.delegate = VideoPickerDelegate.shared
         rootVC.present(picker, animated:true)
     }
 }
 
-class PhotoPickerDelegate: NSObject, PHPickerViewControllerDelegate {
-    static let shared = PhotoPickerDelegate()
-    private override init(){}
-
-    func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
-        picker.dismiss(animated:true)
-        guard let result = results.first else { return }
-
-        result.itemProvider.loadFileRepresentation(forTypeIdentifier: UTType.movie.identifier) { url, error in
-            guard let srcURL = url, error == nil else {
-                print("[VirtualCam] 读取相册视频失败 \(String(describing: error))")
-                return
-            }
-            let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            let destURL = docDir.appendingPathComponent("user_video.mp4")
-
-            try? FileManager.default.removeItem(at: destURL)
-            do {
-                try FileManager.default.copyItem(at: srcURL, to: destURL)
-                print("[VirtualCam] 相册视频已保存为 user_video.mp4")
-                DispatchQueue.main.async {
-                    enableVirtualCam(videoName:"user_video")
-                }
-            } catch {
-                print("[VirtualCam] 复制视频失败: \(error)")
-            }
-        }
-    }
-}
-
-// MARK: Swizzle 部分
+// MARK: AVCaptureVideoDataOutput Swizzle
 func swizzleCaptureVideoDataOutput() {
     let originalSel = #selector(AVCaptureVideoDataOutput.setSampleBufferDelegate(_:queue:))
     let swizzledSel = #selector(AVCaptureVideoDataOutput.trollfools_setSampleBufferDelegate(_:queue:))
@@ -345,38 +327,35 @@ extension AVCaptureVideoDataOutput {
     }
 }
 
-// MARK: 视频逻辑
+// MARK: 视频播放逻辑
 func enableVirtualCam(videoName: String) {
     disableVirtualCam()
-    do {
-        let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let videoURL = docDir.appendingPathComponent("\(videoName).mp4")
-        guard FileManager.default.fileExists(atPath: videoURL.path) else {
-            throw NSError(domain: "VirtualCam", code: -1, userInfo: [NSLocalizedDescriptionKey:"找不到 \(videoName).mp4"])
-        }
-        g_virtualVideoName = videoName
-        let playerItem = AVPlayerItem(url: videoURL)
-        g_videoPlayer = AVPlayer(playerItem: playerItem)
-        let outputSettings: [String:Any] = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
-        g_videoOutput = AVPlayerItemVideoOutput(pixelBufferAttributes: outputSettings)
-        playerItem.add(g_videoOutput!)
-        loopObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: playerItem, queue: .main) { _ in
-            g_videoPlayer?.seek(to: .zero)
-            g_videoPlayer?.play()
-        }
-        g_videoPlayer?.play()
-        print("[VirtualCamDylib] 已启用虚拟视频：\(videoName)")
-    } catch {
+    let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+    let videoURL = docDir.appendingPathComponent("\(videoName).mp4")
+    guard FileManager.default.fileExists(atPath: videoURL.path) else {
         DispatchQueue.main.async {
             guard let rootVC = UIApplication.shared.connectedScenes
                     .filter({ $0.activationState == .foregroundActive })
                     .compactMap({ $0 as? UIWindowScene })
                     .first?.windows.first?.rootViewController else { return }
-            let alert = UIAlertController(title:"错误", message:error.localizedDescription, preferredStyle:.alert)
+            let alert = UIAlertController(title:"错误", message:"找不到 \(videoName).mp4", preferredStyle:.alert)
             alert.addAction(UIAlertAction(title:"确定", style:.default))
             rootVC.present(alert, animated:true)
         }
+        return
     }
+    g_virtualVideoName = videoName
+    let playerItem = AVPlayerItem(url: videoURL)
+    g_videoPlayer = AVPlayer(playerItem: playerItem)
+    let pixelAttr: [String:Any] = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+    g_videoOutput = AVPlayerItemVideoOutput(pixelBufferAttributes: pixelAttr)
+    playerItem.add(g_videoOutput!)
+    loopObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: playerItem, queue: .main) { _ in
+        g_videoPlayer?.seek(to: .zero)
+        g_videoPlayer?.play()
+    }
+    g_videoPlayer?.play()
+    print("[VirtualCamDylib] 启用视频：\(videoName)")
 }
 
 func disableVirtualCam() {
@@ -390,7 +369,7 @@ func disableVirtualCam() {
         NotificationCenter.default.removeObserver(obs)
         loopObserver = nil
     }
-    print("[VirtualCamDylib] 虚拟摄像头已关闭")
+    print("[VirtualCamDylib] 虚拟摄像头关闭")
 }
 
 func getVirtualSampleBuffer() -> CMSampleBuffer? {
@@ -430,7 +409,7 @@ func getVirtualSampleBuffer() -> CMSampleBuffer? {
     return sb
 }
 
-// 给Obj‑C调用，暴露C接口
+// C接口给ObjC调用
 @_cdecl("GetGlobalVirtualSampleBuffer")
 func GetGlobalVirtualSampleBuffer() -> CMSampleBuffer? {
     guard g_virtualVideoName != nil, let buf = getVirtualSampleBuffer() else {
