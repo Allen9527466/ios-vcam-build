@@ -1,7 +1,9 @@
 #import <Foundation/Foundation.h>
 #import <AVFoundation/AVFoundation.h>
+#import <CoreMedia/CoreMedia.h>
 
-extern Unmanaged<CMSampleBuffer> * _Nullable GetGlobalVirtualSampleBuffer(void);
+// 前置声明C接口，返回CMSampleBufferRef（原始指针，ARC下__unsafe_unretained）
+extern CMSampleBufferRef _Nullable GetGlobalVirtualSampleBuffer(void);
 
 @interface VirtualCamProxyDelegate : NSObject <AVCaptureVideoDataOutputSampleBufferDelegate>
 @property (nonatomic, weak) id<AVCaptureVideoDataOutputSampleBufferDelegate> originalDelegate;
@@ -20,9 +22,9 @@ extern Unmanaged<CMSampleBuffer> * _Nullable GetGlobalVirtualSampleBuffer(void);
 
 - (void)captureOutput:(AVCaptureVideoDataOutput *)output didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer fromConnection:(AVCaptureConnection *)connection {
     CMSampleBufferRef frame = sampleBuffer;
-    Unmanaged<CMSampleBuffer> *ret = GetGlobalVirtualSampleBuffer();
-    if(ret) {
-        frame = ret.takeRetainedValue;
+    CMSampleBufferRef newBuffer = GetGlobalVirtualSampleBuffer();
+    if(newBuffer) {
+        frame = newBuffer;
     }
     if ([self.originalDelegate respondsToSelector:@selector(captureOutput:didOutputSampleBuffer:fromConnection:)]) {
         [self.originalDelegate captureOutput:output didOutputSampleBuffer:frame fromConnection:connection];
