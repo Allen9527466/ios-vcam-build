@@ -1,0 +1,24 @@
+name: Build iOS dylib
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Show SDK info
+        run: xcodebuild -showsdks
+
+      - name: Run make compile
+        run: make
+
+      - name: Upload compiled dylib
+        uses: actions/upload-artifact@v4
+        with:
+          name: VirtualCamDylib
+          path: VirtualCamDylib.dylib
