@@ -26,7 +26,6 @@ func constructor() {
 
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
         setupFloatButton()
-        addTwoFingerLongPressGesture()
         showBootToast()
     }
 }
@@ -92,25 +91,6 @@ func setupFloatButton() {
     }
 }
 
-// MARK: 双指长按唤起面板
-func addTwoFingerLongPressGesture() {
-    DispatchQueue.main.async {
-        guard let winScene = UIApplication.shared.connectedScenes
-                .filter({$0.activationState == .foregroundActive})
-                .compactMap({$0 as? UIWindowScene}).first,
-              let topWin = winScene.windows.first else { return }
-        let longPress = UILongPressGestureRecognizer(target: nil, action:#selector(handleTwoFingerLong(_:)))
-        longPress.minimumNumberOfTouches = 2
-        longPress.minimumPressDuration = 0.6
-        longPress.allowableMovement = 35
-        topWin.addGestureRecognizer(longPress)
-    }
-}
-@objc func handleTwoFingerLong(_ gesture:UILongPressGestureRecognizer) {
-    guard gesture.state == .began else { return }
-    g_controlWindow?.toggle()
-}
-
 // MARK: 启动提示弹窗
 func showBootToast() {
     DispatchQueue.main.async {
@@ -119,7 +99,7 @@ func showBootToast() {
                 .compactMap({ $0 as? UIWindowScene })
                 .first?.windows.first?.rootViewController else { return }
         let alert = UIAlertController(title:"虚拟摄像头已加载",
-                                      message:"点击悬浮球 / 双指长按唤出控制面板，支持相册选择MP4",
+                                      message:"点击悬浮球唤出控制面板，支持相册选择MP4",
                                       preferredStyle:.alert)
         alert.addAction(UIAlertAction(title:"确定", style:.default))
         rootVC.present(alert, animated:true)
@@ -296,7 +276,7 @@ func openVideoPicker() {
                 .first?.windows.first?.rootViewController else { return }
         let picker = UIImagePickerController()
         picker.sourceType = .photoLibrary
-        picker.mediaTypes = [kUTTypeMovie as String]
+        picker.mediaTypes = [UTType.movie.identifier]
         picker.delegate = VideoPickerDelegate.shared
         rootVC.present(picker, animated:true)
     }
