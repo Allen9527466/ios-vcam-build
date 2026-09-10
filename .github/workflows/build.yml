@@ -14,8 +14,12 @@ jobs:
       - name: Show SDK info
         run: xcodebuild -showsdks
 
-      - name: Run make compile
-        run: make
+      - name: Compile dylib directly
+        run: |
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
+          swiftc -emit-library -o VirtualCamDylib.dylib VirtualCamDylib.swift \
+            -target arm64-apple-ios14.0 \
+            -sdk "$SDK_PATH"
 
       - name: Upload compiled dylib
         uses: actions/upload-artifact@v4
