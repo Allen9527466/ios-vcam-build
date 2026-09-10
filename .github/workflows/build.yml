@@ -6,22 +6,31 @@ on:
 jobs:
   build:
     runs-on: macos-14
-
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Show SDK info
-        run: xcodebuild -showsdks
-
-      - name: Compile dylib directly
+      - name: compile obj‑c
         run: |
-          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
-          swiftc -emit-library -o VirtualCamDylib.dylib VirtualCamDylib.swift \
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          clang -c ProxyDelegate.m -o ProxyDelegate.o \
             -target arm64-apple-ios14.0 \
-            -sdk "$SDK_PATH"
+            -isysroot "$SDK" \
+            -fobjc-arc \
+            -framework AVFoundation -framework Foundation -framework CoreMedia
 
-      - name: Upload compiled dylib
+      - name: compile swift + link obj‑c object
+        run: |
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          swiftc -emit-library -o VirtualCamDylib.dylib VirtualCamDylib.swift ProxyDelegate.o \
+            -target arm64-apple-ios14.0 \
+            -sdk "$SDK" \
+            -lobjc \
+            -framework UIKit \
+            -framework AVFoundation \
+            -framework CoreMedia \
+            -framework CoreVideo
+
+      - name: upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: VirtualCamDylib
