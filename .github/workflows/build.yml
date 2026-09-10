@@ -20,7 +20,7 @@ jobs:
 
       - name: Compile ObjC arm64
         run: |
-          xcrun clang -arch arm64 -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -c ProxyDelegate.m -o ProxyDelegate_arm64.o
+          xcrun clang -arch arm64 -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -fobjc-arc -c ProxyDelegate.m -o ProxyDelegate_arm64.o
 
       - name: Compile Swift & link arm64
         run: |
@@ -29,7 +29,7 @@ jobs:
 
       - name: Compile ObjC arm64e
         run: |
-          xcrun clang -arch arm64e -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -c ProxyDelegate.m -o ProxyDelegate_arm64e.o
+          xcrun clang -arch arm64e -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -fobjc-arc -c ProxyDelegate.m -o ProxyDelegate_arm64e.o
 
       - name: Compile Swift & link arm64e
         run: |
