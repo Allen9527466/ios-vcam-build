@@ -17,41 +17,63 @@
     return self;
 }
 - (void)captureOutput:(AVCaptureVideoDataOutput *)output didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer fromConnection:(AVCaptureConnection *)connection{
-    // 原样透传画面，后续在这里替换成你的虚拟画面
+    //原样透传画面
     [_originalDelegate captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
 }
 @end
 
-void* VirtualCamProxyDelegate_alloc(id orig){
+id VirtualCamProxyDelegate_alloc(id orig){
     VirtualCamProxyDelegate *p = [[VirtualCamProxyDelegate alloc] initWithOrig:orig];
-    return (__bridge void*)p;
+    return p;
 }
 
-// ===================== 设置页面Hook占位 =====================
-static NSString * const SETTING_VC_CLASS_NAME = @"AwemeSettingsViewController";
-static IMP orig_tableView_didSelectRow;
-static IMP orig_numberOfRows;
-static IMP orig_cellForRow;
+// ===================== 方法交换工具函数（安全标准写法） =====================
+static void safe_swizzle(Class cls, SEL origSel, SEL newSel)
+{
+    if (!cls) return;
+    Method origMethod = class_getInstanceMethod(cls, origSel);
+    Method newMethod = class_getInstanceMethod(cls, newSel);
+    if (!origMethod || !newMethod) return;
+    BOOL addOK = class_addMethod(cls, origSel, method_getImplementation(newMethod), method_getTypeEncoding(newMethod));
+    if(addOK){
+        class_replaceMethod(cls, newSel, method_getImplementation(origMethod), method_getTypeEncoding(origMethod));
+    }else{
+        method_exchangeImplementations(origMethod, newMethod);
+    }
+}
 
-void hook_didSelectRow(id self, SEL _cmd, UITableView *tableView, NSIndexPath *indexPath) {
-    ((void(*)(id,SEL,id,NSIndexPath*))orig_tableView_didSelectRow)(self, _cmd, tableView, indexPath);
+// ===================== AVCaptureVideoDataOutput Hook =====================
+static void hook_setSampleBufferDelegate(id self, SEL _cmd, id delegate, dispatch_queue_t queue)
+{
+    NSLog(@"[VirtualCam] ✅ hook_setSampleBufferDelegate 触发");
+    if(delegate){
+        id proxy = VirtualCamProxyDelegate_alloc(delegate);
+        [self hook_setSampleBufferDelegate:proxy queue:queue];
+    }else{
+        [self hook_setSampleBufferDelegate:nil queue:queue];
+    }
+}
+
+// ===================== 设置页面Hook 占位，后续抓真实类名 =====================
+static void hook_tableView_didSelectRow(id self, SEL _cmd, UITableView *tableView, NSIndexPath *indexPath) {
+    [self hook_tableView_didSelectRow:tableView didSelectRowAtIndexPath:indexPath];
     if(indexPath.section == 1 && indexPath.row == 0){
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"虚拟摄像头" message:@"插件设置面板" preferredStyle:UIAlertControllerStyleAlert];
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"虚拟摄像头" message:@"插件面板" preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
         UIViewController *topVC = [UIApplication sharedApplication].keyWindow.rootViewController;
         [topVC presentViewController:alert animated:YES completion:nil];
     }
 }
 
-NSInteger hook_numberOfRows(id self, SEL _cmd, UITableView *tableView, NSInteger section) {
-    NSInteger cnt = ((NSInteger(*)(id,SEL,id,NSInteger))orig_numberOfRows)(self, _cmd, tableView, section);
+static NSInteger hook_tableView_numberOfRows(id self, SEL _cmd, UITableView *tableView, NSInteger section) {
+    NSInteger cnt = [self hook_tableView:tableView numberOfRowsInSection:section];
     if(section == 1){
         return cnt + 1;
     }
     return cnt;
 }
 
-UITableViewCell* hook_cellForRow(id self, SEL _cmd, UITableView *tableView, NSIndexPath *indexPath) {
+static UITableViewCell* hook_tableView_cellForRow(id self, SEL _cmd, UITableView *tableView, NSIndexPath *indexPath) {
     if(indexPath.section ==1 && indexPath.row ==0){
         UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"Cell"];
         cell.textLabel.text = @"虚拟摄像头";
@@ -61,65 +83,50 @@ UITableViewCell* hook_cellForRow(id self, SEL _cmd, UITableView *tableView, NSIn
     }
     if(indexPath.section ==1 && indexPath.row >0){
         NSIndexPath *oldIdx = [NSIndexPath indexPathForRow:indexPath.row -1 inSection:indexPath.section];
-        return ((UITableViewCell*(*)(id,SEL,id,NSIndexPath*))orig_cellForRow)(self, _cmd, tableView, oldIdx);
+        return [self hook_tableView:tableView cellForRowAtIndexPath:oldIdx];
     }
-    return ((UITableViewCell*(*)(id,SEL,id,NSIndexPath*))orig_cellForRow)(self, _cmd, tableView, indexPath);
+    return [self hook_tableView:tableView cellForRowAtIndexPath:indexPath];
 }
 
-// ===================== AVCaptureVideoDataOutput Hook =====================
-static IMP orig_setSampleBufferDelegate;
-void hook_setSampleBufferDelegate(id self, SEL _cmd, id delegate, dispatch_queue_t queue)
-{
-    NSLog(@"[VirtualCam] hook_setSampleBufferDelegate 触发");
-    if(delegate){
-        void* ptr = VirtualCamProxyDelegate_alloc(delegate);
-        id proxy = (__bridge_transfer id)ptr;
-        ((void(*)(id,SEL,id,dispatch_queue_t))orig_setSampleBufferDelegate)(self, _cmd, proxy, queue);
-    }else{
-        ((void(*)(id,SEL,id,dispatch_queue_t))orig_setSampleBufferDelegate)(self, _cmd, delegate, queue);
-    }
-}
-
-// 方法交换工具函数
-static void swizzle(Class cls, SEL originalSel, SEL newSel, IMP *outOrigIMP){
-    Method origMethod = class_getInstanceMethod(cls, originalSel);
-    Method newMethod = class_getInstanceMethod(cls, newSel);
-    if(origMethod && newMethod){
-        *outOrigIMP = method_getImplementation(origMethod);
-        method_setImplementation(origMethod, newMethod);
-    }
-}
-
-// ===================== Constructor入口 =====================
-__attribute__((constructor))
-static void init_plugin() {
-    NSLog(@"[VirtualCam] ✅ Dylib loaded! 插件已加载");
-
-    // 尝试Hook设置页面
-    Class settingVC = objc_getClass([SETTING_VC_CLASS_NAME UTF8String]);
-    if(settingVC){
-        swizzle(settingVC, @selector(tableView:numberOfRowsInSection:), @selector(hook_tableView:numberOfRowsInSection:), &orig_numberOfRows);
-        swizzle(settingVC, @selector(tableView:cellForRowAtIndexPath:), @selector(hook_tableView:cellForRowAtIndexPath:), &orig_cellForRow);
-        swizzle(settingVC, @selector(tableView:didSelectRowAtIndexPath:), @selector(hook_tableView:didSelectRowAtIndexPath:), &orig_tableView_didSelectRow);
-        NSLog(@"[VirtualCam] ✅ Hook 设置页面成功！");
-    }else{
-        NSLog(@"[VirtualCam] ❌ 找不到类：%@，需要替换SETTING_VC_CLASS_NAME", SETTING_VC_CLASS_NAME);
-    }
-
-    // Hook AVCaptureVideoDataOutput
-    Class avCaptureClass = objc_getClass("AVCaptureVideoDataOutput");
-    if(avCaptureClass){
-        swizzle(avCaptureClass, @selector(setSampleBufferDelegate:queue:), @selector(hook_setSampleBufferDelegate:queue:), &orig_setSampleBufferDelegate);
-        NSLog(@"[VirtualCam] ✅ Hook AVCaptureVideoDataOutput成功");
-    }else{
-        NSLog(@"[VirtualCam] ❌ AVCaptureVideoDataOutput class not found");
-    }
-}
-
-// 给类添加hook方法定义
 @implementation NSObject (HookAdditions)
+- (void)hook_tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {}
 - (NSInteger)hook_tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return 0; }
 - (UITableViewCell *)hook_tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath { return nil; }
-- (void)hook_tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {}
 - (void)hook_setSampleBufferDelegate:(id)delegate queue:(dispatch_queue_t)queue {}
 @end
+
+// ===================== 延迟初始化：放到主线程，等App启动完成再Hook，解决iOS17闪退 =====================
+static void delayed_init()
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSLog(@"[VirtualCam] ✅ delayed_init 开始执行");
+        // Hook AVCaptureVideoDataOutput
+        Class avCaptureClass = objc_getClass("AVCaptureVideoDataOutput");
+        if(avCaptureClass){
+            safe_swizzle(avCaptureClass, @selector(setSampleBufferDelegate:queue:), @selector(hook_setSampleBufferDelegate:queue:));
+            NSLog(@"[VirtualCam] ✅ Hook AVCaptureVideoDataOutput成功");
+        }else{
+            NSLog(@"[VirtualCam] ❌ AVCaptureVideoDataOutput class not found");
+        }
+
+        // ==========重点：这里先用Frida抓抖音设置页面真实类名，暂时注释掉设置页Hook==========
+        // Class settingVC = objc_getClass("AwemeSettingsViewController");
+        // if(settingVC){
+        //     safe_swizzle(settingVC, @selector(tableView:numberOfRowsInSection:), @selector(hook_tableView:numberOfRowsInSection:));
+        //     safe_swizzle(settingVC, @selector(tableView:cellForRowAtIndexPath:), @selector(hook_tableView:cellForRowAtIndexPath:));
+        //     safe_swizzle(settingVC, @selector(tableView:didSelectRowAtIndexPath:), @selector(hook_tableView:didSelectRowAtIndexPath:));
+        //     NSLog(@"[VirtualCam] ✅ Hook 设置页面成功");
+        // }else{
+        //     NSLog(@"[VirtualCam] ❌ 找不到AwemeSettingsViewController");
+        // }
+    });
+}
+
+// constructor只做一件事：往主线程抛延迟任务，**不在constructor里面做任何swizzle**
+__attribute__((constructor))
+static void init_plugin() {
+    NSLog(@"[VirtualCam] ✅ Dylib loaded, wait for main thread...");
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        delayed_init();
+    });
+}
