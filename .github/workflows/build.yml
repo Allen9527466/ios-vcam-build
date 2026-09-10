@@ -11,24 +11,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Compile ObjC (arm64)
-        run: xcrun clang -arch arm64 -isysroot $(xcrun --sdk iphoneos) -mios-version-min=15.0 -c ProxyDelegate.m -o ProxyDelegate_arm64.o
-
-      - name: Compile Swift + link arm64
+      - name: Get iPhoneOS SDK path
+        id: getsdk
         run: |
-          xcrun swiftc -target arm64-apple-ios15.0 -sdk $(xcrun --sdk iphoneos) -emit-object VirtualCamDylib.swift -o VirtualCamDylib_arm64.o
-          xcrun clang -arch arm64 -isysroot $(xcrun --sdk iphoneos) -mios-version-min=15.0 -dynamiclib -o libVirtualCam_arm64.dylib ProxyDelegate_arm64.o VirtualCamDylib_arm64.o -framework UIKit -framework AVFoundation -framework CoreMedia -framework Foundation
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
+          echo "SDK_PATH=$SDK_PATH" >> $GITHUB_ENV
+          echo "SDK Path: $SDK_PATH"
 
-      - name: Compile ObjC (arm64e)
-        run: xcrun clang -arch arm64e -isysroot $(xcrun --sdk iphoneos) -mios-version-min=15.0 -c ProxyDelegate.m -o ProxyDelegate_arm64e.o
-
-      - name: Compile Swift + link arm64e
+      - name: Compile ObjC arm64
         run: |
-          xcrun swiftc -target arm64e-apple-ios15.0 -sdk $(xcrun --sdk iphoneos) -emit-object VirtualCamDylib.swift -o VirtualCamDylib_arm64e.o
-          xcrun clang -arch arm64e -isysroot $(xcrun --sdk iphoneos) -mios-version-min=15.0 -dynamiclib -o libVirtualCam_arm64e.dylib ProxyDelegate_arm64e.o VirtualCamDylib_arm64e.o -framework UIKit -framework AVFoundation -framework CoreMedia -framework Foundation
+          xcrun clang -arch arm64 -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -c ProxyDelegate.m -o ProxyDelegate_arm64.o
 
-      - name: Lipo merge to FAT binary
-        run: xcrun lipo -create libVirtualCam_arm64.dylib libVirtualCam_arm64e.dylib -output libVirtualCam.dylib
+      - name: Compile Swift & link arm64
+        run: |
+          xcrun swiftc -target arm64-apple-ios15.0 -sdk ${{ env.SDK_PATH }} -emit-object VirtualCamDylib.swift -o VirtualCamDylib_arm64.o
+          xcrun clang -arch arm64 -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -dynamiclib -o libVirtualCam_arm64.dylib ProxyDelegate_arm64.o VirtualCamDylib_arm64.o -framework UIKit -framework AVFoundation -framework CoreMedia -framework Foundation
+
+      - name: Compile ObjC arm64e
+        run: |
+          xcrun clang -arch arm64e -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -c ProxyDelegate.m -o ProxyDelegate_arm64e.o
+
+      - name: Compile Swift & link arm64e
+        run: |
+          xcrun swiftc -target arm64e-apple-ios15.0 -sdk ${{ env.SDK_PATH }} -emit-object VirtualCamDylib.swift -o VirtualCamDylib_arm64e.o
+          xcrun clang -arch arm64e -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -dynamiclib -o libVirtualCam_arm64e.dylib ProxyDelegate_arm64e.o VirtualCamDylib_arm64e.o -framework UIKit -framework AVFoundation -framework CoreMedia -framework Foundation
+
+      - name: Lipo merge FAT dylib
+        run: |
+          xcrun lipo -create libVirtualCam_arm64.dylib libVirtualCam_arm64e.dylib -output libVirtualCam.dylib
+          xcrun lipo -info libVirtualCam.dylib
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
