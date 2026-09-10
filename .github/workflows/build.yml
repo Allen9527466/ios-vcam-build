@@ -1,4 +1,4 @@
-name: Build Pure ObjC VirtualCam dylib
+name: Build Pure ObjC VirtualCam dylib arm64 only
 on:
   push:
     branches: [ main ]
@@ -16,23 +16,17 @@ jobs:
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
           echo "SDK_PATH=$SDK_PATH" >> $GITHUB_ENV
 
-      - name: Compile arm64
+      - name: Compile arm64 ONLY
         run: |
           xcrun clang -arch arm64 -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -fobjc-arc -c main.m -o main_arm64.o
-          xcrun clang -arch arm64 -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -fobjc-arc -dynamiclib main_arm64.o -o libVirtualCam_arm64.dylib -framework UIKit -framework AVFoundation -framework CoreMedia -framework Foundation
+          xcrun clang -arch arm64 -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -fobjc-arc -dynamiclib main_arm64.o -o libVirtualCam.dylib -framework UIKit -framework AVFoundation -framework CoreMedia -framework Foundation
 
-      - name: Compile arm64e
+      - name: lipo check arch
         run: |
-          xcrun clang -arch arm64e -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -fobjc-arc -c main.m -o main_arm64e.o
-          xcrun clang -arch arm64e -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -fobjc-arc -dynamiclib main_arm64e.o -o libVirtualCam_arm64e.dylib -framework UIKit -framework AVFoundation -framework CoreMedia -framework Foundation
-
-      - name: Lipo merge FAT
-        run: |
-          xcrun lipo -create libVirtualCam_arm64.dylib libVirtualCam_arm64e.dylib -output libVirtualCam.dylib
           xcrun lipo -info libVirtualCam.dylib
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: virtualcam-dylib
+          name: virtualcam-dylib-arm64
           path: libVirtualCam.dylib
