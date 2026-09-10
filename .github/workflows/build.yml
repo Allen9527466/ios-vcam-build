@@ -19,12 +19,12 @@ jobs:
       - name: Compile arm64
         run: |
           xcrun clang -arch arm64 -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -fobjc-arc -c main.m -o main_arm64.o
-          xcrun clang -arch arm64 -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -fobjc-arc -dynamiclib main_arm64.o -o libVirtualCam_arm64.dylib -framework UIKit -framework AVFoundation -framework CoreMedia -framework Foundation -lsubstrate
+          xcrun clang -arch arm64 -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -fobjc-arc -dynamiclib main_arm64.o -o libVirtualCam_arm64.dylib -framework UIKit -framework AVFoundation -framework CoreMedia -framework Foundation
 
       - name: Compile arm64e
         run: |
           xcrun clang -arch arm64e -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -fobjc-arc -c main.m -o main_arm64e.o
-          xcrun clang -arch arm64e -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -fobjc-arc -dynamiclib main_arm64e.o -o libVirtualCam_arm64e.dylib -framework UIKit -framework AVFoundation -framework CoreMedia -framework Foundation -lsubstrate
+          xcrun clang -arch arm64e -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -fobjc-arc -dynamiclib main_arm64e.o -o libVirtualCam_arm64e.dylib -framework UIKit -framework AVFoundation -framework CoreMedia -framework Foundation
 
       - name: Lipo merge FAT
         run: |
