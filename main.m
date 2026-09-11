@@ -1,7 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <CoreVideo/CoreVideo.h>
 #import <UIKit/UIKit.h>
-#import <substrate.h>
+#include <dlfcn.h>
 
 static BOOL g_virtualCamEnable = NO;
 static OSStatus (*orig_CVPixelBufferLockBaseAddress)(CVPixelBufferRef buffer, CVPixelBufferLockFlags lockFlags);
@@ -14,7 +14,6 @@ OSStatus hook_CVPixelBufferLockBaseAddress(CVPixelBufferRef buffer, CVPixelBuffe
     {
         size_t w = CVPixelBufferGetWidth(buffer);
         size_t h = CVPixelBufferGetHeight(buffer);
-        //过滤小贴图，只处理大画面
         if(w >= 320 && h >=320){
             void *base = CVPixelBufferGetBaseAddress(buffer);
             size_t stride = CVPixelBufferGetBytesPerRow(buffer);
@@ -27,7 +26,6 @@ OSStatus hook_CVPixelBufferLockBaseAddress(CVPixelBufferRef buffer, CVPixelBuffe
     return ret;
 }
 
-//悬浮VC窗口
 @interface VCWindow : UIWindow
 @end
 @implementation VCWindow
@@ -70,10 +68,12 @@ static VCWindow *vcWin;
 
 __attribute__((constructor))
 void lib_main() {
-    // Substrate MSHookFunction 直接hook，不再需要fishhook
-    MSHookFunction((void *)CVPixelBufferLockBaseAddress,
-                   (void *)hook_CVPixelBufferLockBaseAddress,
-                   (void **)&orig_CVPixelBufferLockBaseAddress);
+    // dlsym 动态查找符号，不需要任何hook库
+    orig_CVPixelBufferLockBaseAddress = dlsym(RTLD_DEFAULT, "CVPixelBufferLockBaseAddress");
+    if (orig_CVPixelBufferLockBaseAddress) {
+        // 函数指针交换
+        *(void **)&orig_CVPixelBufferLockBaseAddress = hook_CVPixelBufferLockBaseAddress;
+    }
 
     dispatch_async(dispatch_get_main_queue(), ^{
         vcWin = [[VCWindow alloc] init];
