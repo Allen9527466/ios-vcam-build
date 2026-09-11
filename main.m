@@ -4,7 +4,8 @@
 #import <CoreMedia/CoreMedia.h>
 #include <objc/runtime.h>
 
-// ========== 函数前置声明，解决implicit declaration报错 ==========
+// ========== 前置声明 ==========
+@class FloatBallTarget;
 void showVirtualCamPanel(void);
 static UIViewController* getTopViewController(void);
 
