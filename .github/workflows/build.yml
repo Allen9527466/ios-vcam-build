@@ -32,7 +32,8 @@ jobs:
           -framework CoreVideo \
           -framework Foundation \
           -framework Metal \
-          -framework QuartzCore
+          -framework QuartzCore \
+          -framework CoreGraphics
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
