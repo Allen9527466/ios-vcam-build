@@ -22,7 +22,16 @@ static void swizzle(Class cls, SEL origSel, SEL newSel)
 {
     id<CAMetalDrawable> drawable = [self vcam_nextDrawable];
     if(!g_vcamEnable || !drawable) return drawable;
-    
+
+    // ====== 核心过滤：只处理大于 400x400 的大画布（相机预览），小UI图层直接跳过 ======
+    CGRect layerBounds = self.bounds;
+    CGFloat w = layerBounds.size.width;
+    CGFloat h = layerBounds.size.height;
+    if(w < 400 || h < 400)
+    {
+        return drawable;
+    }
+
     id<MTLTexture> tex = drawable.texture;
     id<MTLDevice> dev = tex.device;
     id<MTLCommandQueue> queue = [dev newCommandQueue];
@@ -31,7 +40,7 @@ static void swizzle(Class cls, SEL origSel, SEL newSel)
     MTLRenderPassDescriptor *rpd = [MTLRenderPassDescriptor renderPassDescriptor];
     rpd.colorAttachments[0].texture = tex;
     rpd.colorAttachments[0].loadAction = MTLLoadActionClear;
-    // 蓝色 RGBA(0,0,1,1)
+    // 蓝色背景 RGBA
     rpd.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 1.0, 1.0);
     
     id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rpd];
