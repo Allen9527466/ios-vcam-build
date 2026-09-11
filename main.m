@@ -1,11 +1,10 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
-#import <AVFoundation/AVFoundation.h>
-#import <CoreMedia/CoreMedia.h>
-#import <CoreVideo/CoreVideo.h>
+#import <Metal/Metal.h>
 #include <objc/runtime.h>
 
 static BOOL g_vcamEnable = NO;
+static id<MTLTexture> g_blueTex = nil;
 
 static void swizzle(Class cls, SEL origSel, SEL newSel)
 {
@@ -14,65 +13,34 @@ static void swizzle(Class cls, SEL origSel, SEL newSel)
     method_exchangeImplementations(origMethod, newMethod);
 }
 
-@interface AVCaptureOutput (VCamHook)
-- (void)vcam_captureOutput:(AVCaptureOutput *)output didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer fromConnection:(AVCaptureConnection *)connection;
+@interface CAMetalLayer (VCamHook)
+- (id<CAMetalDrawable>)vcam_nextDrawable;
 @end
 
-@implementation AVCaptureOutput (VCamHook)
-
-- (void)vcam_captureOutput:(AVCaptureOutput *)output didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer fromConnection:(AVCaptureConnection *)connection
+@implementation CAMetalLayer (VCamHook)
+- (id<CAMetalDrawable>)vcam_nextDrawable
 {
-    if (!g_vcamEnable)
-    {
-        // 关闭状态，直接放行原始画面
-        [self vcam_captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
-        return;
-    }
+    id<CAMetalDrawable> drawable = [self vcam_nextDrawable];
+    if(!g_vcamEnable || !drawable) return drawable;
     
-    CVPixelBufferRef pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer);
-    if (!pixelBuffer)
-    {
-        [self vcam_captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
-        return;
+    id<MTLTexture> tex = drawable.texture;
+    if(!g_blueTex){
+        id<MTLDevice> dev = tex.device;
+        MTLTextureDescriptor *desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:tex.pixelFormat width:tex.width height:tex.height mipmapped:NO];
+        g_blueTex = [dev newTextureWithDescriptor:desc];
+        uint8_t blue[4] = {255,0,0,255};
+        [g_blueTex replaceRegion:MTLRegionMake2D(0,0,tex.width,tex.height) mipmapLevel:0 withBytes:blue bytesPerRow:4];
     }
-
-    size_t width = CVPixelBufferGetWidth(pixelBuffer);
-    size_t height = CVPixelBufferGetHeight(pixelBuffer);
-
-    CVPixelBufferRef newPixelBuffer = NULL;
-    CVPixelBufferCreate(NULL, width, height, kCVPixelFormatType_32BGRA, NULL, &newPixelBuffer);
-    CVPixelBufferLockBaseAddress(newPixelBuffer, 0);
-    void *baseAddr = CVPixelBufferGetBaseAddress(newPixelBuffer);
-    size_t bytesPerRow = CVPixelBufferGetBytesPerRow(newPixelBuffer);
-
-    // BGRA 蓝色：B=255 G=0 R=0 A=255
-    uint8_t *p = (uint8_t *)baseAddr;
-    for(size_t y=0; y<height; y++){
-        for(size_t x=0; x<width*4; x+=4){
-            p[x+0] = 255;
-            p[x+1] = 0;
-            p[x+2] = 0;
-            p[x+3] = 255;
-        }
-        p += bytesPerRow;
-    }
-    CVPixelBufferUnlockBaseAddress(newPixelBuffer,0);
-
-    CMSampleBufferRef newSampleBuffer = NULL;
-    CMVideoFormatDescriptionRef fmtDesc = NULL;
-    CMVideoFormatDescriptionCreateForImageBuffer(NULL, newPixelBuffer, &fmtDesc);
-
-    CMSampleTimingInfo timing;
-    CMSampleBufferGetSampleTimingInfo(sampleBuffer,0,&timing);
-    CMSampleBufferCreateForImageBuffer(NULL, newPixelBuffer, YES, NULL, NULL, fmtDesc, &timing, &newSampleBuffer);
-
-    [self vcam_captureOutput:output didOutputSampleBuffer:newSampleBuffer fromConnection:connection];
-
-    CFRelease(newSampleBuffer);
-    CFRelease(fmtDesc);
-    CVPixelBufferRelease(newPixelBuffer);
+    MTLRenderPassDescriptor *rpd = [MTLRenderPassDescriptor renderPassDescriptor];
+    rpd.colorAttachments[0].texture = tex;
+    rpd.colorAttachments[0].loadAction = MTLLoadActionClear;
+    rpd.colorAttachments[0].clearColor = MTLClearColorMake(0,0,1,1);
+    id<MTLCommandBuffer> cmd = [tex.device commandQueue].commandBuffer;
+    id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rpd];
+    [enc endEncoding];
+    [cmd commit];
+    return drawable;
 }
-
 @end
 
 @interface VCamFloatWindow : UIWindow
@@ -114,10 +82,10 @@ static VCamFloatWindow *g_floatWin = nil;
 __attribute__((constructor))
 void lib_main()
 {
-    Class cls = objc_getClass("AVCaptureOutput");
-    SEL origSel = @selector(captureOutput:didOutputSampleBuffer:fromConnection:);
-    SEL newSel  = @selector(vcam_captureOutput:didOutputSampleBuffer:fromConnection:);
-    swizzle(cls, origSel, newSel);
+    Class metalLayerCls = objc_getClass("CAMetalLayer");
+    SEL origSel = @selector(nextDrawable);
+    SEL newSel = @selector(vcam_nextDrawable);
+    swizzle(metalLayerCls, origSel, newSel);
     
     dispatch_async(dispatch_get_main_queue(), ^{
         g_floatWin = [[VCamFloatWindow alloc] init];
