@@ -4,7 +4,6 @@
 #include <objc/runtime.h>
 
 static BOOL g_vcamEnable = NO;
-static id<MTLTexture> g_blueTex = nil;
 
 static void swizzle(Class cls, SEL origSel, SEL newSel)
 {
@@ -24,21 +23,20 @@ static void swizzle(Class cls, SEL origSel, SEL newSel)
     if(!g_vcamEnable || !drawable) return drawable;
     
     id<MTLTexture> tex = drawable.texture;
-    if(!g_blueTex){
-        id<MTLDevice> dev = tex.device;
-        MTLTextureDescriptor *desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:tex.pixelFormat width:tex.width height:tex.height mipmapped:NO];
-        g_blueTex = [dev newTextureWithDescriptor:desc];
-        uint8_t blue[4] = {255,0,0,255};
-        [g_blueTex replaceRegion:MTLRegionMake2D(0,0,tex.width,tex.height) mipmapLevel:0 withBytes:blue bytesPerRow:4];
-    }
+    id<MTLDevice> dev = tex.device;
+    id<MTLCommandQueue> queue = [dev newCommandQueue];
+    id<MTLCommandBuffer> cmd = [queue commandBuffer];
+    
     MTLRenderPassDescriptor *rpd = [MTLRenderPassDescriptor renderPassDescriptor];
     rpd.colorAttachments[0].texture = tex;
     rpd.colorAttachments[0].loadAction = MTLLoadActionClear;
-    rpd.colorAttachments[0].clearColor = MTLClearColorMake(0,0,1,1);
-    id<MTLCommandBuffer> cmd = [tex.device commandQueue].commandBuffer;
+    // 蓝色：RGBA(0,0,1,1)
+    rpd.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 1.0, 1.0);
+    
     id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rpd];
     [enc endEncoding];
     [cmd commit];
+    
     return drawable;
 }
 @end
