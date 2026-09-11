@@ -81,7 +81,16 @@ static GetFrame *_inst;
 
 #pragma mark - 全局状态
 static BOOL g_virtualCamEnable = NO;
-static UIWindow *_floatWindow; // 全局static强引用，防止释放！
+static UIWindow *_floatWindow;
+static FloatBallTarget *floatTarget;
+
+@interface FloatBallTarget : NSObject
+@end
+@implementation FloatBallTarget
+- (void)floatBallTap:(UIButton *)sender {
+    showVirtualCamPanel();
+}
+@end
 
 #pragma mark - 帧代理
 @interface VirtualCamProxyDelegate : NSObject <AVCaptureVideoDataOutputSampleBufferDelegate>
@@ -190,7 +199,6 @@ void showVirtualCamPanel(void) {
 #pragma mark - 修复版悬浮球
 static void setupFloatBall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        // 已经创建直接返回，防止重复创建多个悬浮窗
         if (_floatWindow) {
             NSLog(@"[FloatBall] 悬浮窗口已经存在，跳过创建");
             return;
@@ -200,7 +208,6 @@ static void setupFloatBall(void) {
         CGRect frame = CGRectMake([UIScreen mainScreen].bounds.size.width - ballSize - 20, 200, ballSize, ballSize);
 
         _floatWindow = [[UIWindow alloc] initWithFrame:frame];
-        // 关键！windowLevel要高于普通App界面，不然被盖住看不见
         _floatWindow.windowLevel = UIWindowLevelAlert + 100;
         _floatWindow.backgroundColor = [UIColor clearColor];
 
@@ -213,25 +220,16 @@ static void setupFloatBall(void) {
         [floatBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
         floatBtn.titleLabel.font = [UIFont boldSystemFontOfSize:14];
 
-        [floatBtn addTarget:self action:@selector(floatBallTap:) forControlEvents:UIControlEventTouchUpInside];
+        // ========== 这里修复！使用全局floatTarget，不再写self ==========
+        [floatBtn addTarget:floatTarget action:@selector(floatBallTap:) forControlEvents:UIControlEventTouchUpInside];
 
         _floatWindow.rootViewController = [[UIViewController alloc] init];
         [_floatWindow.rootViewController.view addSubview:floatBtn];
-        _floatWindow.hidden = NO; // 必须显示！很多人漏掉这句，窗口创建但是隐藏看不见
+        _floatWindow.hidden = NO;
 
         NSLog(@"[FloatBall] ✅ 悬浮球创建完成");
     });
 }
-
-// 悬浮球点击回调
-@interface FloatBallTarget : NSObject
-@end
-@implementation FloatBallTarget
-- (void)floatBallTap:(UIButton *)sender {
-    showVirtualCamPanel();
-}
-@end
-static FloatBallTarget *floatTarget;
 
 #pragma mark - 初始化入口
 static void delayed_init()
@@ -246,9 +244,7 @@ static void delayed_init()
             NSLog(@"[VirtualCam] ❌ AVCaptureVideoDataOutput not found");
         }
 
-        // 初始化悬浮球target，持有对象防止释放
         floatTarget = [[FloatBallTarget alloc] init];
-        // 延迟再创建悬浮窗口，给App界面完全加载留出时间
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             setupFloatBall();
         });
