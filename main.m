@@ -2,7 +2,6 @@
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <CoreMedia/CoreMedia.h>
-#import <CoreVideo/CoreVideo.h>
 #include <objc/runtime.h>
 
 // ========== 前置声明 ==========
@@ -17,69 +16,6 @@ static UIViewController* getTopViewController(void);
 @implementation NSObject (HookAdditions)
 - (void)hook_setSampleBufferDelegate:(id)delegate queue:(dispatch_queue_t)queue {}
 @end
-
-// 生成蓝色纯色SampleBuffer，复用原始帧的时间戳
-static CMSampleBufferRef CreateBlueTestBuffer(CGSize size, CMTime pts)
-{
-    CVPixelBufferRef pixelBuffer = NULL;
-    NSDictionary *attrs = @{
-        (__bridge NSString*)kCVPixelBufferWidthKey : @(size.width),
-        (__bridge NSString*)kCVPixelBufferHeightKey : @(size.height),
-        (__bridge NSString*)kCVPixelBufferPixelFormatTypeKey : @(kCVPixelFormatType_32BGRA),
-        (__bridge NSString*)kCVPixelBufferIOSurfacePropertiesKey : @{}
-    };
-
-    CVPixelBufferCreate(kCFAllocatorDefault,
-                        (size_t)size.width,
-                        (size_t)size.height,
-                        kCVPixelFormatType_32BGRA,
-                        (__bridge CFDictionaryRef)attrs,
-                        &pixelBuffer);
-
-    if(!pixelBuffer) return NULL;
-
-    CVPixelBufferLockBaseAddress(pixelBuffer,0);
-    void *baseAddr = CVPixelBufferGetBaseAddress(pixelBuffer);
-    size_t bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer);
-    size_t height = CVPixelBufferGetHeight(pixelBuffer);
-    // 填充蓝色 BGRA: B=255 G=0 R=0 A=255
-    for(size_t y = 0; y < height; y++){
-        uint8_t *row = (uint8_t*)baseAddr + y * bytesPerRow;
-        for(size_t x = 0; x < bytesPerRow; x +=4){
-            row[x+0] = 255;
-            row[x+1] = 0;
-            row[x+2] = 0;
-            row[x+3] = 255;
-        }
-    }
-    CVPixelBufferUnlockBaseAddress(pixelBuffer,0);
-
-    CMVideoFormatDescriptionRef fmtDesc = NULL;
-    CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault, pixelBuffer, &fmtDesc);
-    if(!fmtDesc){
-        CVPixelBufferRelease(pixelBuffer);
-        return NULL;
-    }
-
-    CMSampleTimingInfo timing;
-    timing.duration = CMTimeMake(1, 30);
-    timing.presentationTimeStamp = pts;
-    timing.decodeTimeStamp = pts;
-
-    CMSampleBufferRef sampleBuf = NULL;
-    CMSampleBufferCreateForImageBuffer(kCFAllocatorDefault,
-                                       pixelBuffer,
-                                       true,
-                                       NULL,
-                                       NULL,
-                                       fmtDesc,
-                                       &timing,
-                                       &sampleBuf);
-
-    CFRelease(fmtDesc);
-    CVPixelBufferRelease(pixelBuffer);
-    return sampleBuf;
-}
 
 #pragma mark - 全局状态
 static BOOL g_virtualCamEnable = NO;
@@ -135,18 +71,32 @@ static UIViewController* getTopViewController(void)
         return;
     }
 
-    // 开启：生成蓝色测试画面，复用原始帧时间戳
-    CMTime pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer);
-    CGSize camSize = CGSizeMake(720, 1280);
-    CMSampleBufferRef testBuf = CreateBlueTestBuffer(camSize, pts);
-
-    if(testBuf){
-        [_originalDelegate captureOutput:output didOutputSampleBuffer:testBuf fromConnection:connection];
-        CFRelease(testBuf);
-    }else{
-        // 构造失败，降级回原画面
+    // 开启模式：直接修改原始pixelbuffer填充蓝色，复用原始缓冲区、尺寸、时间戳
+    CVPixelBufferRef pixelBuf = CMSampleBufferGetImageBuffer(sampleBuffer);
+    if (!pixelBuf) {
         [_originalDelegate captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
+        return;
     }
+
+    CVPixelBufferLockBaseAddress(pixelBuf,0);
+    void *baseAddr = CVPixelBufferGetBaseAddress(pixelBuf);
+    size_t bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuf);
+    size_t height = CVPixelBufferGetHeight(pixelBuf);
+
+    // BGRA 蓝色填充 B=255 G=0 R=0 A=255
+    for(size_t y = 0; y < height; y++){
+        uint8_t *row = (uint8_t*)baseAddr + y * bytesPerRow;
+        for(size_t x = 0; x < bytesPerRow; x +=4){
+            row[x+0] = 255;
+            row[x+1] = 0;
+            row[x+2] = 0;
+            row[x+3] = 255;
+        }
+    }
+    CVPixelBufferUnlockBaseAddress(pixelBuf,0);
+
+    // 直接发送修改后的原始sampleBuffer
+    [_originalDelegate captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
 }
 @end
 
@@ -190,12 +140,12 @@ void showVirtualCamPanel(void) {
         if (!topVC) return;
 
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"虚拟相机【测试模式‑蓝色画面】"
-                                                                         message:@"点击开启，摄像头输出蓝色纯色画面\n出现蓝色即代表Hook链路正常"
+                                                                         message:@"点击开启，摄像头画面填充蓝色\n出现蓝色即代表Hook链路正常"
                                                                   preferredStyle:UIAlertControllerStyleAlert];
 
         UIAlertAction *actionEnable = [UIAlertAction actionWithTitle:@"✅开启虚拟相机" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
             g_virtualCamEnable = YES;
-            NSLog(@"[VirtualCam] ✅ 测试模式开启，输出蓝色帧");
+            NSLog(@"[VirtualCam] ✅ 测试模式开启，画面填充蓝色");
         }];
 
         UIAlertAction *actionDisable = [UIAlertAction actionWithTitle:@"❌关闭虚拟相机" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
