@@ -1,128 +1,208 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
-#import <Metal/Metal.h>
 #import <AVFoundation/AVFoundation.h>
 #import <CoreMedia/CoreMedia.h>
 #import <CoreVideo/CoreVideo.h>
 #import <QuartzCore/QuartzCore.h>
 #import <CoreGraphics/CoreGraphics.h>
+#import <objc/runtime.h>
 
-static id<MTLTexture> createTextureFromImage(UIImage *img, id<MTLDevice> dev)
-{
-    if (!img || !dev) return nil;
-    
-    CGImageRef cgImage = img.CGImage;
-    if (!cgImage) return nil;
-    
-    size_t width = CGImageGetWidth(cgImage);
-    size_t height = CGImageGetHeight(cgImage);
-    size_t bytesPerPixel = 4;
-    size_t bytesPerRow = width * bytesPerPixel;
-    size_t bufferSize = height * bytesPerRow;
-    
-    uint8_t *bitmapData = malloc(bufferSize);
-    if (!bitmapData) return nil;
-    memset(bitmapData, 0, bufferSize);
-    
-    // 创建CG位图上下文
-    CGContextRef cgContext = CGBitmapContextCreate(
-        bitmapData,
+#pragma mark - 全局配置
+
+static BOOL g_replaceEnabled = NO;
+static NSURL *g_selectedVideoURL = nil;
+static AVAssetReader *g_assetReader = nil;
+static dispatch_queue_t g_videoQueue = nil;
+
+#pragma mark - 导出给 UI 调用的接口
+
+void setVirtualVideoEnabled(BOOL enabled) {
+    g_replaceEnabled = enabled;
+    NSLog(@"[VirtualVideo] setVirtualVideoEnabled: %@", enabled ? @"ON" : @"OFF");
+}
+
+BOOL isVirtualVideoEnabled(void) {
+    return g_replaceEnabled;
+}
+
+void setSelectedVideoPath(NSString *videoPath) {
+    if (!videoPath) {
+        g_selectedVideoURL = nil;
+        return;
+    }
+    g_selectedVideoURL = [NSURL fileURLWithPath:videoPath];
+    NSLog(@"[VirtualVideo] setSelectedVideoPath: %@", videoPath);
+}
+
+NSString *getSelectedVideoPath(void) {
+    return g_selectedVideoURL.path;
+}
+
+#pragma mark - 视频帧读取
+
+static CMSampleBufferRef createBlackSampleBuffer(CMSampleBufferRef originalBuffer) {
+    if (!originalBuffer) return NULL;
+
+    CVPixelBufferRef pixelBuffer = CMSampleBufferGetImageBuffer(originalBuffer);
+    if (!pixelBuffer) return NULL;
+
+    size_t width = CVPixelBufferGetWidth(pixelBuffer);
+    size_t height = CVPixelBufferGetHeight(pixelBuffer);
+
+    CVPixelBufferRef newPixelBuffer = NULL;
+    NSDictionary *attrs = @{
+        (__bridge NSString *)kCVPixelBufferIOSurfacePropertiesKey: @{}
+    };
+
+    CVReturn ret = CVPixelBufferCreate(
+        kCFAllocatorDefault,
+        width,
+        height,
+        kCVPixelFormatType_32BGRA,
+        (__bridge CFDictionaryRef)attrs,
+        &newPixelBuffer
+    );
+
+    if (ret != kCVReturnSuccess) return NULL;
+
+    CVPixelBufferLockBaseAddress(newPixelBuffer, 0);
+    void *baseAddr = CVPixelBufferGetBaseAddress(newPixelBuffer);
+    size_t bytesPerRow = CVPixelBufferGetBytesPerRow(newPixelBuffer);
+
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    CGContextRef ctx = CGBitmapContextCreate(
+        baseAddr,
         width,
         height,
         8,
         bytesPerRow,
-        CGImageGetColorSpace(cgImage),
-        kCGImageAlphaPremultipliedLast
+        colorSpace,
+        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little
     );
-    
-    if (!cgContext) {
-        free(bitmapData);
-        return nil;
-    }
-    
-    // 绘制图片
-    CGContextDrawImage(cgContext, CGRectMake(0,0,width,height), cgImage);
-    
-    // 创建Metal纹理描述
-    MTLTextureDescriptor *texDesc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
-                                                                                         width:width
-                                                                                        height:height
-                                                                                     mipmapped:NO];
-    id<MTLTexture> texture = [dev newTextureWithDescriptor:texDesc];
-    [texture replaceRegion:MTLRegionMake2D(0,0,width,height)
-                mipmapLevel:0
-                  withBytes:bitmapData
-                bytesPerRow:bytesPerRow];
-    
-    // ✅ 释放CG资源！防止内存泄漏
-    CGContextRelease(cgContext);
-    free(bitmapData);
-    
-    return texture;
-}
+    CGColorSpaceRelease(colorSpace);
 
-// 示例：虚拟摄像头帧生成函数，你可以按需修改
-void fillSampleBufferFromImage(UIImage *img, CMSampleBufferRef *outSampleBuffer)
-{
-    if (!img || !outSampleBuffer) return;
-    *outSampleBuffer = NULL;
-    
-    CGImageRef cgImage = img.CGImage;
-    size_t w = CGImageGetWidth(cgImage);
-    size_t h = CGImageGetHeight(cgImage);
-    
-    CVPixelBufferRef pixelBuffer = NULL;
-    NSDictionary *pixelAttr = @{
-        (__bridge NSString *)kCVPixelBufferIOSurfacePropertiesKey: @{}
-    };
-    CVReturn ret = CVPixelBufferCreate(
+    if (ctx) {
+        CGContextSetRGBFillColor(ctx, 0, 0, 0, 1);
+        CGContextFillRect(ctx, CGRectMake(0, 0, width, height));
+        CGContextRelease(ctx);
+    }
+
+    CVPixelBufferUnlockBaseAddress(newPixelBuffer, 0);
+
+    CMVideoFormatDescriptionRef fmtDesc = NULL;
+    CMVideoFormatDescriptionCreateForImageBuffer(
         kCFAllocatorDefault,
-        w,
-        h,
-        kCVPixelFormatType_32BGRA,
-        (__bridge CFDictionaryRef)pixelAttr,
-        &pixelBuffer
+        newPixelBuffer,
+        &fmtDesc
     );
-    if (ret != kCVReturnSuccess) return;
-    
-    CVPixelBufferLockBaseAddress(pixelBuffer, 0);
-    void *baseAddr = CVPixelBufferGetBaseAddress(pixelBuffer);
-    size_t bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer);
-    
-    CGContextRef ctx = CGBitmapContextCreate(
-        baseAddr, w, h, 8, bytesPerRow,
-        CGImageGetColorSpace(cgImage),
-        kCGImageAlphaPremultipliedFirst
-    );
-    CGContextDrawImage(ctx, CGRectMake(0,0,w,h), cgImage);
-    
-    CVPixelBufferUnlockBaseAddress(pixelBuffer, 0);
-    CGContextRelease(ctx); // 释放CGContext
-    
-    CMVideoFormatDescriptionRef fmtDesc;
-    CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault, pixelBuffer, &fmtDesc);
-    
-    CMSampleTimingInfo timing = {
-        .duration = CMTimeMake(1, 30),
-        .presentationTimeStamp = CMTimeMake(0, 1000),
-        .decodeTimeStamp = CMTimeMake(0, 1000),
-    };
-    CMSampleBufferCreateReadyWithImageBuffer(
+
+    CMSampleTimingInfo timing;
+    CMSampleBufferGetSampleTimingInfo(originalBuffer, 0, &timing);
+
+    CMSampleBufferRef newSampleBuffer = NULL;
+    CMSampleBufferCreateForImageBuffer(
         kCFAllocatorDefault,
-        pixelBuffer,
+        newPixelBuffer,
+        YES,
+        NULL,
+        NULL,
         fmtDesc,
         &timing,
-        outSampleBuffer
+        &newSampleBuffer
     );
-    
+
     CFRelease(fmtDesc);
-    CVPixelBufferRelease(pixelBuffer);
+    CVPixelBufferRelease(newPixelBuffer);
+
+    return newSampleBuffer;
 }
 
-// dylib入口，如果不需要main函数可以删掉
-int main(int argc, const char * argv[]) {
-    @autoreleasepool {
-        NSLog(@"VirtualCam dylib loaded");
+static CMSampleBufferRef readNextVideoFrame(void) {
+    if (!g_selectedVideoURL) return NULL;
+
+    if (!g_assetReader) {
+        AVAsset *asset = [AVAsset assetWithURL:g_selectedVideoURL];
+        AVAssetTrack *track = [asset.tracks filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"mediaType == %@", AVMediaTypeVideo]].firstObject;
+        if (!track) return NULL;
+
+        NSDictionary *outputSettings = @{
+            (id)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA)
+        };
+
+        NSError *error = nil;
+        g_assetReader = [[AVAssetReader alloc] initWithAsset:asset error:&error];
+        if (!g_assetReader || error) return NULL;
+
+        AVAssetReaderTrackOutput *output = [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:track outputSettings:outputSettings];
+        [g_assetReader addOutput:output];
+        [g_assetReader startReading];
     }
-    return 0;
+
+    AVAssetReaderTrackOutput *output = g_assetReader.outputs.firstObject;
+    CMSampleBufferRef sampleBuffer = [output copyNextSampleBuffer];
+
+    if (!sampleBuffer) {
+        [g_assetReader cancelReading];
+        g_assetReader = nil;
+    }
+
+    return sampleBuffer;
+}
+
+#pragma mark - AVCaptureOutput Hook
+
+static void (*orig_captureOutput)(id self, SEL _cmd, AVCaptureOutput *output, CMSampleBufferRef sampleBuffer, AVCaptureConnection *connection);
+
+static void vcam_captureOutput(id self, SEL _cmd, AVCaptureOutput *output, CMSampleBufferRef sampleBuffer, AVCaptureConnection *connection) {
+    if (!g_replaceEnabled || !g_selectedVideoURL) {
+        if (orig_captureOutput) {
+            orig_captureOutput(self, _cmd, output, sampleBuffer, connection);
+        }
+        return;
+    }
+
+    CMSampleBufferRef videoFrame = readNextVideoFrame();
+
+    if (videoFrame) {
+        if (orig_captureOutput) {
+            orig_captureOutput(self, _cmd, output, videoFrame, connection);
+        }
+        CFRelease(videoFrame);
+    } else {
+        CMSampleBufferRef blackFrame = createBlackSampleBuffer(sampleBuffer);
+        if (blackFrame) {
+            if (orig_captureOutput) {
+                orig_captureOutput(self, _cmd, output, blackFrame, connection);
+            }
+            CFRelease(blackFrame);
+        } else {
+            if (orig_captureOutput) {
+                orig_captureOutput(self, _cmd, output, sampleBuffer, connection);
+            }
+        }
+    }
+}
+
+#pragma mark - Hook 入口
+
+__attribute__((constructor))
+static void initVirtualVideo(void) {
+    @autoreleasepool {
+        NSLog(@"[VirtualVideo] loaded");
+
+        g_videoQueue = dispatch_queue_create("com.virtualvideo.queue", DISPATCH_QUEUE_SERIAL);
+
+        Class cls = objc_getClass("AVCaptureOutput");
+        if (!cls) return;
+
+        SEL sel = @selector(captureOutput:didOutputSampleBuffer:fromConnection:);
+        Method orig = class_getInstanceMethod(cls, sel);
+
+        if (orig) {
+            IMP newImp = (IMP)vcam_captureOutput;
+            orig_captureOutput = (void (*)(id, SEL, AVCaptureOutput *, CMSampleBufferRef, AVCaptureConnection *))method_getImplementation(orig);
+            method_setImplementation(orig, newImp);
+            NSLog(@"[VirtualVideo] hooked captureOutput");
+        }
+    }
 }
