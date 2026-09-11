@@ -12,17 +12,16 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
 
-      - name: Setup Theos environment
-        uses: Randomblock1/theos-action@v1
+      - name: Setup Theos
+        uses: hbang/setup-theos@v1
         with:
-          theos-dir: ${{ github.workspace }}/theos
-          theos-src: https://github.com/theos/theos.git
-          theos-sdks: https://github.com/theos/sdks.git
+          theos-version: latest
+          sdks-version: latest
 
       - name: Compile Tweak & Save full log
         shell: bash
         run: |
-          export THEOS=${{ github.workspace }}/theos
+          export THEOS=$GITHUB_WORKSPACE/theos
           export PATH="$THEOS/bin:$PATH"
           set -o pipefail
           make clean
