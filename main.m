@@ -2,6 +2,7 @@
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <CoreMedia/CoreMedia.h>
+#import <CoreVideo/CoreVideo.h>
 #include <objc/runtime.h>
 
 // ========== 前置声明 ==========
@@ -71,7 +72,6 @@ static UIViewController* getTopViewController(void)
         return;
     }
 
-    // 开启模式：直接修改原始pixelbuffer填充蓝色，复用原始缓冲区、尺寸、时间戳
     CVPixelBufferRef pixelBuf = CMSampleBufferGetImageBuffer(sampleBuffer);
     if (!pixelBuf) {
         [_originalDelegate captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
@@ -95,7 +95,6 @@ static UIViewController* getTopViewController(void)
     }
     CVPixelBufferUnlockBaseAddress(pixelBuf,0);
 
-    // 直接发送修改后的原始sampleBuffer
     [_originalDelegate captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
 }
 @end
