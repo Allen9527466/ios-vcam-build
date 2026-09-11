@@ -1,11 +1,14 @@
 name: Build
-on:
-  push:
-    branches: [ main ]
+on: push
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Build
-        run: echo "build done"
+      - uses: actions/checkout@v5
+      - name: Build with Makefile
+        run: make
+      - name: Upload dylib
+        uses: actions/upload-artifact@v5
+        with:
+          name: ios-dylib
+          path: libtest.dylib
