@@ -10,6 +10,12 @@ static NSURL *g_selectedVideoURL = nil;
 static AVAssetReader *g_assetReader = nil;
 static dispatch_queue_t g_videoQueue = nil;
 
+// ========== 函数前置声明，解决编译报错 ==========
+static CMSampleBufferRef createBlackSampleBuffer(CMSampleBufferRef originalBuffer);
+static CMSampleBufferRef readNextVideoFrame(void);
+static void resetAssetReader(void);
+// ==============================================
+
 @interface AVCaptureOutput (VCamHook)
 - (void)vcam_captureOutput:(AVCaptureOutput *)output didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer fromConnection:(AVCaptureConnection *)connection;
 @end
