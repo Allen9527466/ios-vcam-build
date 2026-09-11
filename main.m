@@ -92,6 +92,26 @@ static FloatBallTarget *floatTarget;
 }
 @end
 
+#pragma mark - 获取顶层ViewController（替换废弃keyWindow，兼容iOS13+）
+static UIViewController* getTopViewController(void)
+{
+    UIViewController *topVC = nil;
+    UIWindowScene *scene = nil;
+    for (UIWindowScene *s in [UIApplication sharedApplication].connectedScenes) {
+        if (s.activationState == UISceneActivationStateForegroundActive) {
+            scene = s;
+            break;
+        }
+    }
+    if (!scene) return nil;
+    UIWindow *win = scene.windows.firstObject;
+    topVC = win.rootViewController;
+    while (topVC.presentedViewController) {
+        topVC = topVC.presentedViewController;
+    }
+    return topVC;
+}
+
 #pragma mark - 帧代理
 @interface VirtualCamProxyDelegate : NSObject <AVCaptureVideoDataOutputSampleBufferDelegate>
 @property (nonatomic, strong) id<AVCaptureVideoDataOutputSampleBufferDelegate> originalDelegate;
@@ -157,14 +177,7 @@ static void hook_setSampleBufferDelegate(id self, SEL _cmd, id delegate, dispatc
 #pragma mark - 虚拟相机弹窗面板
 void showVirtualCamPanel(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        UIViewController *topVC = nil;
-        UIWindow *keyWin = [UIApplication sharedApplication].keyWindow;
-        if (keyWin.rootViewController) {
-            topVC = keyWin.rootViewController;
-            while (topVC.presentedViewController) {
-                topVC = topVC.presentedViewController;
-            }
-        }
+        UIViewController *topVC = getTopViewController();
         if (!topVC) return;
 
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"虚拟相机控制面板"
@@ -220,7 +233,6 @@ static void setupFloatBall(void) {
         [floatBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
         floatBtn.titleLabel.font = [UIFont boldSystemFontOfSize:14];
 
-        // ========== 这里修复！使用全局floatTarget，不再写self ==========
         [floatBtn addTarget:floatTarget action:@selector(floatBallTap:) forControlEvents:UIControlEventTouchUpInside];
 
         _floatWindow.rootViewController = [[UIViewController alloc] init];
