@@ -130,7 +130,7 @@ static CMSampleBufferRef readNextVideoFrame(void) {
         }
         if(!g_assetReader) return;
 
-        AVAssetReaderTrackOutput *out = g_assetReader.outputs.firstObject;
+        AVAssetReaderTrackOutput *out = (AVAssetReaderTrackOutput *)g_assetReader.outputs.firstObject;
         buf = [out copyNextSampleBuffer];
 
         if(!buf){
@@ -138,7 +138,7 @@ static CMSampleBufferRef readNextVideoFrame(void) {
             g_assetReader = nil;
             resetAssetReader();
             if(g_assetReader){
-                AVAssetReaderTrackOutput *out2 = g_assetReader.outputs.firstObject;
+                AVAssetReaderTrackOutput *out2 = (AVAssetReaderTrackOutput *)g_assetReader.outputs.firstObject;
                 buf = [out2 copyNextSampleBuffer];
             }
         }
