@@ -4,7 +4,7 @@ MIN_VER = 14.0
 CC = xcrun clang
 
 CFLAGS = -arch $(ARCH) -isysroot $(SDK) -mios-version-min=$(MIN_VER) -fobjc-arc -O2
-FRAMEWORKS = -framework UIKit -framework AVFoundation -framework CoreMedia -framework CoreVideo -framework Foundation -framework QuartzCore -framework CoreGraphics -framework MobileCoreServices
+FRAMEWORKS = -framework UIKit -framework AVFoundation -framework CoreMedia -framework CoreVideo -framework Foundation -framework QuartzCore -framework CoreGraphics -framework MobileCoreServices -framework PhotosUI
 
 all: libXUUZ.dylib
 
