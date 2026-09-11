@@ -9,7 +9,38 @@ static BOOL g_replaceEnabled = NO;
 static NSURL *g_selectedVideoURL = nil;
 static AVAssetReader *g_assetReader = nil;
 static dispatch_queue_t g_videoQueue = nil;
-static IMP origCaptureOutputImp = NULL;
+
+@interface AVCaptureOutput (VCamHook)
+- (void)vcam_captureOutput:(AVCaptureOutput *)output didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer fromConnection:(AVCaptureConnection *)connection;
+@end
+
+@implementation AVCaptureOutput (VCamHook)
+
+- (void)vcam_captureOutput:(AVCaptureOutput *)output didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer fromConnection:(AVCaptureConnection *)connection
+{
+    NSLog(@"[VirtualVideo] captureOutput called, replace=%d", g_replaceEnabled);
+    if (!g_replaceEnabled || !g_selectedVideoURL) {
+        // 调用原始实现
+        [self vcam_captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
+        return;
+    }
+
+    CMSampleBufferRef newFrame = readNextVideoFrame();
+    if(newFrame){
+        [self vcam_captureOutput:output didOutputSampleBuffer:newFrame fromConnection:connection];
+        CFRelease(newFrame);
+    }else{
+        CMSampleBufferRef black = createBlackSampleBuffer(sampleBuffer);
+        if(black){
+            [self vcam_captureOutput:output didOutputSampleBuffer:black fromConnection:connection];
+            CFRelease(black);
+        }else{
+            [self vcam_captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
+        }
+    }
+}
+
+@end
 
 __attribute__((visibility("default")))
 void setVirtualVideoEnabled(BOOL enabled) {
@@ -91,19 +122,18 @@ static void resetAssetReader(void) {
 
 static CMSampleBufferRef readNextVideoFrame(void) {
     if(!g_selectedVideoURL) return NULL;
-    
+
     __block CMSampleBufferRef buf = NULL;
     dispatch_sync(g_videoQueue, ^{
         if(!g_assetReader){
             resetAssetReader();
         }
         if(!g_assetReader) return;
-        
+
         AVAssetReaderTrackOutput *out = g_assetReader.outputs.firstObject;
         buf = [out copyNextSampleBuffer];
-        
+
         if(!buf){
-            // 视频读完，循环播放：立即重置 reader 再读一帧
             [g_assetReader cancelReading];
             g_assetReader = nil;
             resetAssetReader();
@@ -116,41 +146,22 @@ static CMSampleBufferRef readNextVideoFrame(void) {
     return buf;
 }
 
-static void vcam_captureOutput(id self, SEL _cmd, AVCaptureOutput *output, CMSampleBufferRef sampleBuffer, AVCaptureConnection *connection) {
-    NSLog(@"[VirtualVideo] captureOutput called, replace=%d", g_replaceEnabled);
-    
-    if (!g_replaceEnabled || !g_selectedVideoURL) {
-        ((void(*)(id,SEL,id,CMSampleBufferRef,id))origCaptureOutputImp)(self,_cmd,output,sampleBuffer,connection);
-        return;
-    }
-    
-    CMSampleBufferRef newFrame = readNextVideoFrame();
-    if(newFrame){
-        ((void(*)(id,SEL,id,CMSampleBufferRef,id))origCaptureOutputImp)(self,_cmd,output,newFrame,connection);
-        CFRelease(newFrame);
-    }else{
-        CMSampleBufferRef black = createBlackSampleBuffer(sampleBuffer);
-        if(black){
-            ((void(*)(id,SEL,id,CMSampleBufferRef,id))origCaptureOutputImp)(self,_cmd,output,black,connection);
-            CFRelease(black);
-        }else{
-            ((void(*)(id,SEL,id,CMSampleBufferRef,id))origCaptureOutputImp)(self,_cmd,output,sampleBuffer,connection);
-        }
-    }
-}
-
+// ✅ PAC安全交换方法，不用直接改写IMP指针
 void virtualVideoSetupHook(void)
 {
     @autoreleasepool {
         g_videoQueue = dispatch_queue_create("com.virtualvideo.queue",DISPATCH_QUEUE_SERIAL);
         Class cls = objc_getClass("AVCaptureOutput");
         if(!cls) return;
-        SEL sel = @selector(captureOutput:didOutputSampleBuffer:fromConnection:);
-        Method m = class_getInstanceMethod(cls, sel);
-        if(m && !origCaptureOutputImp){
-            origCaptureOutputImp = method_getImplementation(m);
-            method_setImplementation(m, (IMP)vcam_captureOutput);
-            NSLog(@"VirtualVideo hook installed");
+
+        SEL origSel = @selector(captureOutput:didOutputSampleBuffer:fromConnection:);
+        SEL newSel = @selector(vcam_captureOutput:didOutputSampleBuffer:fromConnection:);
+
+        Method origM = class_getInstanceMethod(cls, origSel);
+        Method newM = class_getInstanceMethod(cls, newSel);
+        if(origM && newM){
+            method_exchangeImplementations(origM, newM);
+            NSLog(@"VirtualVideo hook installed (method_exchangeImplementations)");
         }
     }
 }
