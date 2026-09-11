@@ -11,18 +11,11 @@ jobs:
 
       - name: Build & Compile
         run: |
-          # 一次性全部在同一个shell执行，环境变量不会丢失
           export THEOS=$HOME/theos
           git clone --recursive https://github.com/theos/theos $THEOS
           brew install ldid
           
-          # 下载SDK
-          mkdir -p $THEOS/sdks
-          cd $THEOS/sdks
-          curl -L https://github.com/theos/sdks/raw/master/iPhoneOS14.0.sdk.tar.xz -o sdk.tar.xz
-          tar -xf sdk.tar.xz
-          
-          # 回到源码目录编译
+          # 回到源码目录，theos会自动拉取需要的SDK
           cd $GITHUB_WORKSPACE
           make package
 
