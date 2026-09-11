@@ -15,10 +15,11 @@ jobs:
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
           echo "SDK_PATH=$SDK_PATH" >> $GITHUB_ENV
           xcrun clang -arch arm64 \
+          -ObjC \
           -isysroot $SDK_PATH \
           -mios-version-min=14.0 \
           -fobjc-arc \
-          -dynamiclib main.m VirtualVideo.c \
+          -dynamiclib main.m VirtualVideo.m \
           -o libXUUZ.dylib \
           -framework UIKit \
           -framework AVFoundation \
@@ -26,7 +27,8 @@ jobs:
           -framework CoreVideo \
           -framework Foundation \
           -framework QuartzCore \
-          -framework CoreGraphics
+          -framework CoreGraphics \
+          -framework MobileCoreServices
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
