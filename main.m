@@ -22,7 +22,6 @@ static void swizzle(Class cls, SEL origSel, SEL newSel)
 
 - (void)vcam_captureOutput:(AVCaptureOutput *)output didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer fromConnection:(AVCaptureConnection *)connection
 {
-    // 先执行原始相机帧回调
     [self vcam_captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
     
     if (!g_vcamEnable) return;
@@ -38,39 +37,35 @@ static void swizzle(Class cls, SEL origSel, SEL newSel)
 
     if (format == kCVPixelFormatType_32BGRA)
     {
-        // BGRA 格式
         void *baseAddr = CVPixelBufferGetBaseAddress(pixelBuffer);
         size_t stride = CVPixelBufferGetBytesPerRow(pixelBuffer);
         uint32_t *ptr = (uint32_t *)baseAddr;
         for(size_t y = 0; y < height; y++){
             uint32_t *row = ptr + (y * stride / 4);
             for(size_t x = 0; x < width; x++){
-                row[x] = 0xFFFF0000; // 蓝色 BGRA
+                row[x] = 0xFFFF0000;
             }
         }
     }
     else if (format == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange || format == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange)
     {
-        // NV12 双平面 YUV（iPhone原生摄像头输出）
         void *yBase = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 0);
         void *uvBase = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 1);
         size_t yStride = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0);
         size_t uvStride = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 1);
 
-        // Y通道：128=灰色；255=纯白；0纯黑，这里设置Y=128
         uint8_t *yPtr = (uint8_t *)yBase;
         for(size_t y = 0; y < height; y++){
             uint8_t *row = yPtr + y * yStride;
             memset(row, 128, width);
         }
-        // UV通道：U=255,V=128 → 蓝色
         uint8_t *uvPtr = (uint8_t *)uvBase;
         size_t uvHeight = height / 2;
         for(size_t y = 0; y < uvHeight; y++){
             uint8_t *row = uvPtr + y * uvStride;
             for(size_t x = 0; x < width; x += 2){
-                row[x] = 255;   // U
-                row[x+1] = 128; // V
+                row[x] = 255;
+                row[x+1] = 128;
             }
         }
     }
@@ -80,9 +75,9 @@ static void swizzle(Class cls, SEL origSel, SEL newSel)
 
 @end
 
-// 悬浮按钮UI
 @interface VCamFloatWindow : UIWindow
 @end
+
 @implementation VCamFloatWindow
 - (instancetype)init
 {
@@ -119,16 +114,12 @@ static VCamFloatWindow *g_floatWin = nil;
 __attribute__((constructor))
 void lib_main()
 {
-    // swizzle AVCaptureOutput 帧回调方法
     Class cls = objc_getClass("AVCaptureOutput");
     SEL origSel = @selector(captureOutput:didOutputSampleBuffer:fromConnection:);
     SEL newSel  = @selector(vcam_captureOutput:didOutputSampleBuffer:fromConnection:);
     swizzle(cls, origSel, newSel);
     
-    // 主线程创建悬浮窗
     dispatch_async(dispatch_get_main_queue(), ^{
         g_floatWin = [[VCamFloatWindow alloc] init];
     });
 }
-
-@end
