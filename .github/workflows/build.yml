@@ -14,19 +14,12 @@ jobs:
         run: |
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
           echo "SDK_PATH=$SDK_PATH" >> $GITHUB_ENV
-
           xcrun clang -arch arm64 \
           -isysroot $SDK_PATH \
           -mios-version-min=14.0 \
           -fobjc-arc \
-          -c main.m -o main_arm64.o
-
-          xcrun clang -arch arm64 \
-          -isysroot $SDK_PATH \
-          -mios-version-min=14.0 \
-          -fobjc-arc \
-          -dynamiclib main_arm64.o \
-          -o libVirtualCam.dylib \
+          -dynamiclib main.m VirtualVideo.c \
+          -o libXUUZ.dylib \
           -framework UIKit \
           -framework AVFoundation \
           -framework CoreMedia \
@@ -38,5 +31,5 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: libVirtualCam
-          path: libVirtualCam.dylib
+          name: libXUUZ
+          path: libXUUZ.dylib
