@@ -4,21 +4,34 @@
 #import <CoreMedia/CoreMedia.h>
 #import <CoreVideo/CoreVideo.h>
 #import <MobileCoreServices/MobileCoreServices.h>
+#import <PhotosUI/PhotosUI.h>
 #import <objc/runtime.h>
 
-// ========= 函数原型声明（VirtualVideo.m内的接口） =========
 void virtualVideoSetupHook(void);
 void setVirtualVideoEnabled(BOOL enabled);
 BOOL isVirtualVideoEnabled(void);
 void setSelectedVideoPath(NSString *videoPath);
 NSString *getSelectedVideoPath(void);
 
-#pragma mark - 悬浮主窗口
-@interface CustomMenuWindow : UIWindow <UIImagePickerControllerDelegate, UINavigationControllerDelegate>
+static UIWindow *getKeyWindow(void) {
+    if (@available(iOS 13, *)) {
+        for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes) {
+            if (scene.activationState == UISceneActivationStateForegroundActive) {
+                for (UIWindow *w in scene.windows) {
+                    if (w.isKeyWindow) return w;
+                }
+            }
+        }
+    }
+    return [UIApplication sharedApplication].keyWindow;
+}
+
+@interface CustomMenuWindow : UIWindow <UIImagePickerControllerDelegate, UINavigationControllerDelegate, PHPickerViewControllerDelegate>
 @property(nonatomic, strong) UIButton *floatBtn;
 @end
 
 @implementation CustomMenuWindow
+
 - (instancetype)init {
     self = [super init];
     if(self){
@@ -38,17 +51,18 @@ NSString *getSelectedVideoPath(void);
         [self.floatBtn addTarget:self action:@selector(showMenuPanel) forControlEvents:UIControlEventTouchUpInside];
         [self addSubview:self.floatBtn];
         
-        // 悬浮球拖拽手势
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(drag:)];
         [self.floatBtn addGestureRecognizer:pan];
     }
     return self;
 }
+
 - (void)drag:(UIPanGestureRecognizer *)ges {
     CGPoint trans = [ges translationInView:self];
     self.center = CGPointMake(self.center.x + trans.x, self.center.y + trans.y);
     [ges setTranslation:CGPointZero inView:self];
 }
+
 - (void)showMenuPanel {
     UIViewController *vc = [[UIViewController alloc] init];
     vc.modalPresentationStyle = UIModalPresentationPageSheet;
@@ -97,7 +111,7 @@ NSString *getSelectedVideoPath(void);
     
     UILabel *labelSelectedTip = [[UILabel alloc] initWithFrame:CGRectMake(panel.bounds.size.width - 110,210,90,44)];
     labelSelectedTip.tag = 1001;
-    labelSelectedTip.text = @"未选择";
+    labelSelectedTip.text = getSelectedVideoPath() ? @"已选择" : @"未选择";
     labelSelectedTip.textAlignment = NSTextAlignmentRight;
     labelSelectedTip.font = [UIFont systemFontOfSize:14];
     [panel addSubview:labelSelectedTip];
@@ -117,48 +131,73 @@ NSString *getSelectedVideoPath(void);
     labelReplaceTip.font = [UIFont systemFontOfSize:14];
     [panel addSubview:labelReplaceTip];
     
-    UIViewController *topVC = [UIApplication sharedApplication].keyWindow.rootViewController;
+    UIViewController *topVC = getKeyWindow().rootViewController;
     [topVC presentViewController:vc animated:YES completion:nil];
 }
 
 - (void)pickVideo:(UIButton *)sender {
-    UIImagePickerController *picker = [[UIImagePickerController alloc] init];
-    picker.sourceType = UIImagePickerControllerSourceTypePhotoLibrary;
-    picker.mediaTypes = @[(NSString *)kUTTypeMovie];
-    picker.delegate = self;
-    UIViewController *topVC = [UIApplication sharedApplication].keyWindow.rootViewController;
-    [topVC presentViewController:picker animated:YES completion:nil];
+    if (@available(iOS 14, *)) {
+        PHPickerConfiguration *config = [[PHPickerConfiguration alloc] init];
+        config.filter = [PHPickerFilter videosFilter];
+        config.selectionLimit = 1;
+        PHPickerViewController *picker = [[PHPickerViewController alloc] initWithConfiguration:config];
+        picker.delegate = self;
+        UIViewController *topVC = getKeyWindow().rootViewController;
+        [topVC presentViewController:picker animated:YES completion:nil];
+    } else {
+        UIImagePickerController *picker = [[UIImagePickerController alloc] init];
+        picker.sourceType = UIImagePickerControllerSourceTypePhotoLibrary;
+        picker.mediaTypes = @[(NSString *)kUTTypeMovie];
+        picker.delegate = self;
+        UIViewController *topVC = getKeyWindow().rootViewController;
+        [topVC presentViewController:picker animated:YES completion:nil];
+    }
 }
 
 - (void)toggleReplace:(UIButton *)sender {
     BOOL current = isVirtualVideoEnabled();
     setVirtualVideoEnabled(!current);
-    NSLog(@"[XUUz] 虚拟视频替换状态：%@", !current ? @"开启替换" : @"禁用替换");
-    
     UIView *panel = sender.superview;
     UILabel *tip = [panel viewWithTag:1002];
     tip.text = isVirtualVideoEnabled() ? @"替换中" : @"已禁用";
 }
 
-#pragma mark - UIImagePickerControllerDelegate
+#pragma mark - PHPicker Delegate (iOS 14+)
+- (void)picker:(PHPickerViewController *)picker didFinishPicking:(NSArray<PHPickerResult *> *)results API_AVAILABLE(ios(14)) {
+    [picker dismissViewControllerAnimated:YES completion:nil];
+    PHPickerResult *result = results.firstObject;
+    if (!result) return;
+    
+    NSItemProvider *provider = result.itemProvider;
+    if ([provider hasItemConformingToTypeIdentifier:(NSString *)kUTTypeMovie]) {
+        [provider loadFileRepresentationForTypeIdentifier:(NSString *)kUTTypeMovie completionHandler:^(NSURL * _Nullable url, NSError * _Nullable error) {
+            if (url) {
+                NSString *tmpPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"vcam_selected.mp4"];
+                NSURL *tmpURL = [NSURL fileURLWithPath:tmpPath];
+                [[NSFileManager defaultManager] removeItemAtURL:tmpURL error:nil];
+                [[NSFileManager defaultManager] copyItemAtURL:url toURL:tmpURL error:nil];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    setSelectedVideoPath(tmpPath);
+                });
+            }
+        }];
+    }
+}
+
+#pragma mark - UIImagePicker Delegate (iOS 13 及以下)
 - (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary<UIImagePickerControllerInfoKey,id> *)info {
     NSURL *videoUrl = info[UIImagePickerControllerMediaURL];
     if(videoUrl){
-        NSString *videoPath = videoUrl.path;
-        setSelectedVideoPath(videoPath);
-        NSLog(@"[XUUz] 选中视频路径：%@", videoPath);
-        UIView *panel = picker.presentingViewController.view.subviews.lastObject;
-        UILabel *tip = [panel viewWithTag:1001];
-        tip.text = @"已选择";
+        setSelectedVideoPath(videoUrl.path);
     }
     [picker dismissViewControllerAnimated:YES completion:nil];
 }
 - (void)imagePickerControllerDidCancel:(UIImagePickerController *)picker {
     [picker dismissViewControllerAnimated:YES completion:nil];
 }
+
 @end
 
-#pragma mark - 全局入口
 static CustomMenuWindow *g_menuWin = nil;
 
 __attribute__((constructor))
@@ -166,10 +205,9 @@ static void tweakMainEntry(void)
 {
     @autoreleasepool {
         NSLog(@"XUUz V5.0 虚拟工具箱加载成功");
-        
         dispatch_async(dispatch_get_main_queue(), ^{
             g_menuWin = [[CustomMenuWindow alloc] init];
+            virtualVideoSetupHook();
         });
-        virtualVideoSetupHook();
     }
 }
