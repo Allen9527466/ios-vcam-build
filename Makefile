@@ -1,13 +1,17 @@
-ARCHS = arm64
-TARGET = iphone:clang:latest:14.0
-INSTALL_TARGET_PROCESSES = SpringBoard
+# 输出动态库名称
+OUTPUT = libtest.dylib
+# 源码文件
+SRC = main.m
+# 编译器
+CC = clang
+# 编译参数：生成动态库，ObjC，链接Foundation框架
+CFLAGS = -shared -fPIC -ObjC
+LDFLAGS = -framework Foundation
 
-include $(THEOS)/makefiles/common.mk
+all: $(OUTPUT)
 
-TWEAK_NAME = FakeCam
+$(OUTPUT): $(SRC)
+	$(CC) $(CFLAGS) $(SRC) -o $(OUTPUT) $(LDFLAGS)
 
-FakeCam_FILES = main.m
-FakeCam_CFLAGS = -fobjc-arc
-FakeCam_FRAMEWORKS = UIKit Foundation AVFoundation CoreMedia CoreVideo MobileCoreServices
-
-include $(THEOS_MAKE_PATH)/tweak.mk
+clean:
+	rm -f $(OUTPUT)
