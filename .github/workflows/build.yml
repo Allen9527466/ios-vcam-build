@@ -10,35 +10,35 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
 
-      - name: Cache Theos + SDKs
+      - name: Cache Theos & SDK
         uses: actions/cache@v4
         with:
-          path: |
-            $HOME/theos
-          key: theos-full-v1
+          path: $HOME/theos
+          key: theos-final-v1
 
-      - name: Install Theos and SDK
+      - name: Prepare Theos environment
         run: |
           export THEOS=$HOME/theos
           if [ ! -d "$THEOS/bin" ]; then
-            curl --retry 5 --retry-delay 3 -s https://raw.githubusercontent.com/theos/theos/master/bin/install-theos | bash -s -- --yes
+            git clone --depth=1 https://github.com/theos/theos.git $THEOS
           fi
           if [ ! -d "$THEOS/sdks/iPhoneOS15.0.sdk" ]; then
-            git clone https://github.com/theos/sdks.git $THEOS/sdks
+            git clone --depth=1 https://github.com/theos/sdks.git $THEOS/sdks
           fi
+          brew install ldid make
 
-      - name: Build tweak
+      - name: Compile Tweak
         run: |
           export THEOS=$HOME/theos
           make package
 
-      - name: Upload dylib
+      - name: Upload compiled dylib
         uses: actions/upload-artifact@v4
         with:
           name: FakeCamDylib
           path: .theos/obj/arm64/FakeCam.dylib
 
-      - name: Upload deb package
+      - name: Upload DEB package
         uses: actions/upload-artifact@v4
         with:
           name: FakeCam_DEB
