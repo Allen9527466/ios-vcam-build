@@ -1,15 +1,13 @@
-ARCH = arm64
-SDK = $(shell xcrun --sdk iphoneos --show-sdk-path)
-MIN_VER = 14.0
-CC = xcrun clang
+ARCHS = arm64
+TARGET = iphone:clang:14.0:14.0
+INSTALL_TARGET_PROCESSES = Aweme
 
-CFLAGS = -arch $(ARCH) -isysroot $(SDK) -mios-version-min=$(MIN_VER) -fobjc-arc -O2
-FRAMEWORKS = -framework UIKit -framework AVFoundation -framework CoreMedia -framework CoreVideo -framework Foundation -framework QuartzCore -framework CoreGraphics -framework MobileCoreServices -framework PhotosUI
+include $(THEOS)/makefiles/common.mk
 
-all: libXUUZ.dylib
+TWEAK_NAME = FakeCam
 
-libXUUZ.dylib: main.m VirtualVideo.m
-	$(CC) $(CFLAGS) -dynamiclib main.m VirtualVideo.m -o libXUUZ.dylib $(FRAMEWORKS)
+FakeCam_FILES = main.m
+FakeCam_FRAMEWORKS = UIKit AVFoundation CoreMedia CoreVideo Foundation QuartzCore CoreGraphics MobileCoreServices PhotosUI
+FakeCam_CFLAGS = -fobjc-arc
 
-clean:
-	rm -f libXUUZ.dylib *.o
+include $(THEOS_MAKE_PATH)/tweak.mk
