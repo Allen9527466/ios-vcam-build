@@ -4,7 +4,7 @@
 #import <CoreMedia/CoreMedia.h>
 #include <objc/runtime.h>
 
-// 弱声明CoreVideo函数，不再需要#import <CoreVideo/CoreVideo.h>
+// 只弱声明CVPixelBuffer函数，CMSampleBufferGetImageBuffer由CoreMedia头提供
 __attribute__((weak_import))
 void CVPixelBufferLockBaseAddress(void *pixelBuffer, int lockFlags);
 
@@ -19,9 +19,6 @@ size_t CVPixelBufferGetBytesPerRow(void *pixelBuffer);
 
 __attribute__((weak_import))
 size_t CVPixelBufferGetHeight(void *pixelBuffer);
-
-__attribute__((weak_import))
-void* CMSampleBufferGetImageBuffer(CMSampleBufferRef sbuf);
 
 // ========== 前置声明 ==========
 @class FloatBallTarget;
@@ -89,7 +86,7 @@ static UIViewController* getTopViewController(void)
         return;
     }
 
-    void *pixelBuf = CMSampleBufferGetImageBuffer(sampleBuffer);
+    CVPixelBufferRef pixelBuf = CMSampleBufferGetImageBuffer(sampleBuffer);
     if (!pixelBuf) {
         [_originalDelegate captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
         return;
