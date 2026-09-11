@@ -9,7 +9,6 @@ static NSURL *g_selectedVideoURL = nil;
 static AVAssetReader *g_assetReader = nil;
 static dispatch_queue_t g_videoQueue = nil;
 
-// 对外接口，UI继续调用，状态正常保存，只是没有实际hook逻辑
 __attribute__((visibility("default")))
 void setVirtualVideoEnabled(BOOL enabled) {
     g_replaceEnabled = enabled;
@@ -38,7 +37,6 @@ NSString *getSelectedVideoPath(void) {
     return g_selectedVideoURL.path;
 }
 
-// 帧处理工具函数保留，后续有正确hook点再调用
 static CMSampleBufferRef createBlackSampleBuffer(CMSampleBufferRef originalBuffer) {
     if (!originalBuffer) return NULL;
     CVPixelBufferRef pixelBuffer = CMSampleBufferGetImageBuffer(originalBuffer);
@@ -112,11 +110,10 @@ static CMSampleBufferRef readNextVideoFrame(void) {
     return buf;
 }
 
-// 空函数！！！现在不做任何hook，避免闪退，接口保留给UI调用
 void virtualVideoSetupHook(void)
 {
     @autoreleasepool {
         g_videoQueue = dispatch_queue_create("com.virtualvideo.queue",DISPATCH_QUEUE_SERIAL);
-        NSLog(@"[VirtualVideo] hook function stub, skip AVCaptureOutput swizzle for crash safety");
+        NSLog(@"[VirtualVideo] stub hook, no swizzle (crash safe)");
     }
 }
