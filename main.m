@@ -17,70 +17,68 @@ static UIViewController* getTopViewController(void);
 - (void)hook_setSampleBufferDelegate:(id)delegate queue:(dispatch_queue_t)queue {}
 @end
 
-#pragma mark - GetFrame 视频帧读取
-@interface GetFrame : NSObject
-@property (nonatomic, strong) AVAssetReader *assetReader;
-@property (nonatomic, strong) AVAssetReaderTrackOutput *trackOutput;
-@property (nonatomic, strong) NSString *videoFilePath;
-+ (instancetype)sharedInstance;
-- (BOOL)openVideo:(NSString *)filePath;
-- (CMSampleBufferRef)copyNextSampleBuffer;
-- (void)resetReader;
-@end
+// 生成蓝色纯色SampleBuffer，复用原始帧的时间戳
+static CMSampleBufferRef CreateBlueTestBuffer(CGSize size, CMTime pts)
+{
+    CVPixelBufferRef pixelBuffer = NULL;
+    NSDictionary *attrs = @{
+        (__bridge NSString*)kCVPixelBufferWidthKey : @(size.width),
+        (__bridge NSString*)kCVPixelBufferHeightKey : @(size.height),
+        (__bridge NSString*)kCVPixelBufferPixelFormatTypeKey : @(kCVPixelFormatType_32BGRA),
+        (__bridge NSString*)kCVPixelBufferIOSurfacePropertiesKey : @{}
+    };
 
-@implementation GetFrame
-static GetFrame *_inst;
-+ (instancetype)sharedInstance {
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        _inst = [[self alloc] init];
-    });
-    return _inst;
-}
+    CVPixelBufferCreate(kCFAllocatorDefault,
+                        (size_t)size.width,
+                        (size_t)size.height,
+                        kCVPixelFormatType_32BGRA,
+                        (__bridge CFDictionaryRef)attrs,
+                        &pixelBuffer);
 
-- (BOOL)openVideo:(NSString *)filePath {
-    [self resetReader];
-    self.videoFilePath = filePath;
-    NSURL *url = [NSURL fileURLWithPath:filePath];
-    AVAsset *asset = [AVAsset assetWithURL:url];
-    AVAssetTrack *track = [[asset tracksWithMediaType:AVMediaTypeVideo] firstObject];
-    if (!track) {
-        NSLog(@"[GetFrame] ❌ 找不到视频轨道");
-        return NO;
-    }
-    self.assetReader = [[AVAssetReader alloc] initWithAsset:asset error:nil];
-    // 删除CoreVideo相关像素格式参数，不再依赖CoreVideo框架
-    self.trackOutput = [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:track outputSettings:nil];
-    if ([self.assetReader canAddOutput:self.trackOutput]) {
-        [self.assetReader addOutput:self.trackOutput];
-    }
-    BOOL startOK = [self.assetReader startReading];
-    if (!startOK) {
-        NSLog(@"[GetFrame] ❌ assetReader startReading失败");
-        return NO;
-    }
-    return YES;
-}
+    if(!pixelBuffer) return NULL;
 
-- (CMSampleBufferRef)copyNextSampleBuffer {
-    if (!self.assetReader || !self.trackOutput) return NULL;
-    if (self.assetReader.status == AVAssetReaderStatusCompleted) {
-        [self resetReader];
-        [self openVideo:self.videoFilePath];
+    CVPixelBufferLockBaseAddress(pixelBuffer,0);
+    void *baseAddr = CVPixelBufferGetBaseAddress(pixelBuffer);
+    size_t bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer);
+    size_t height = CVPixelBufferGetHeight(pixelBuffer);
+    // 填充蓝色 BGRA: B=255 G=0 R=0 A=255
+    for(size_t y = 0; y < height; y++){
+        uint8_t *row = (uint8_t*)baseAddr + y * bytesPerRow;
+        for(size_t x = 0; x < bytesPerRow; x +=4){
+            row[x+0] = 255;
+            row[x+1] = 0;
+            row[x+2] = 0;
+            row[x+3] = 255;
+        }
+    }
+    CVPixelBufferUnlockBaseAddress(pixelBuffer,0);
+
+    CMVideoFormatDescriptionRef fmtDesc = NULL;
+    CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault, pixelBuffer, &fmtDesc);
+    if(!fmtDesc){
+        CVPixelBufferRelease(pixelBuffer);
         return NULL;
     }
-    CMSampleBufferRef buf = [self.trackOutput copyNextSampleBuffer];
-    return buf;
-}
 
-- (void)resetReader {
-    if (self.assetReader) {
-        [self.assetReader cancelReading];
-        self.assetReader = nil;
-    }
-    self.trackOutput = nil;
+    CMSampleTimingInfo timing;
+    timing.duration = CMTimeMake(1, 30);
+    timing.presentationTimeStamp = pts;
+    timing.decodeTimeStamp = pts;
+
+    CMSampleBufferRef sampleBuf = NULL;
+    CMSampleBufferCreateForImageBuffer(kCFAllocatorDefault,
+                                       pixelBuffer,
+                                       true,
+                                       NULL,
+                                       NULL,
+                                       fmtDesc,
+                                       &timing,
+                                       &sampleBuf);
+
+    CFRelease(fmtDesc);
+    CVPixelBufferRelease(pixelBuffer);
+    return sampleBuf;
 }
-@end
 
 #pragma mark - 全局状态
 static BOOL g_virtualCamEnable = NO;
@@ -95,7 +93,7 @@ static FloatBallTarget *floatTarget;
 }
 @end
 
-#pragma mark - 获取顶层ViewController（替换废弃keyWindow，兼容iOS13+）
+#pragma mark - 获取顶层ViewController（iOS13+ Scene兼容）
 static UIViewController* getTopViewController(void)
 {
     UIViewController *topVC = nil;
@@ -131,14 +129,21 @@ static UIViewController* getTopViewController(void)
 
 - (void)captureOutput:(AVCaptureVideoDataOutput *)output didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer fromConnection:(AVCaptureConnection *)connection {
     if (!g_virtualCamEnable) {
+        // 关闭：透传真实摄像头
         [_originalDelegate captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
         return;
     }
-    CMSampleBufferRef fakeBuf = [[GetFrame sharedInstance] copyNextSampleBuffer];
-    if (fakeBuf) {
-        [_originalDelegate captureOutput:output didOutputSampleBuffer:fakeBuf fromConnection:connection];
-        CFRelease(fakeBuf);
-    } else {
+
+    // 开启：生成蓝色测试画面，复用原始帧时间戳
+    CMTime pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer);
+    CGSize camSize = CGSizeMake(720, 1280);
+    CMSampleBufferRef testBuf = CreateBlueTestBuffer(camSize, pts);
+
+    if(testBuf){
+        [_originalDelegate captureOutput:output didOutputSampleBuffer:testBuf fromConnection:connection];
+        CFRelease(testBuf);
+    }else{
+        // 构造失败，降级回原画面
         [_originalDelegate captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
     }
 }
@@ -183,25 +188,18 @@ void showVirtualCamPanel(void) {
         UIViewController *topVC = getTopViewController();
         if (!topVC) return;
 
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"虚拟相机控制面板"
-                                                                         message:@"视频需要放在App有权限访问的目录\n默认路径：/var/mobile/Movie/test.mp4"
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"虚拟相机【测试模式‑蓝色画面】"
+                                                                         message:@"点击开启，摄像头输出蓝色纯色画面\n出现蓝色即代表Hook链路正常"
                                                                   preferredStyle:UIAlertControllerStyleAlert];
 
         UIAlertAction *actionEnable = [UIAlertAction actionWithTitle:@"✅开启虚拟相机" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-            NSString *videoPath = @"/var/mobile/Movie/test.mp4";
-            BOOL ret = [[GetFrame sharedInstance] openVideo:videoPath];
-            if(ret){
-                g_virtualCamEnable = YES;
-                NSLog(@"[VirtualCam] ✅ 虚拟相机已开启");
-            }else{
-                NSLog(@"[VirtualCam] ❌ 打开视频失败，请检查路径和权限");
-            }
+            g_virtualCamEnable = YES;
+            NSLog(@"[VirtualCam] ✅ 测试模式开启，输出蓝色帧");
         }];
 
         UIAlertAction *actionDisable = [UIAlertAction actionWithTitle:@"❌关闭虚拟相机" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
             g_virtualCamEnable = NO;
-            [[GetFrame sharedInstance] resetReader];
-            NSLog(@"[VirtualCam] ✅ 虚拟相机关闭，恢复真实摄像头");
+            NSLog(@"[VirtualCam] ✅ 关闭，恢复真实摄像头");
         }];
 
         UIAlertAction *cancel = [UIAlertAction actionWithTitle:@"关闭弹窗" style:UIAlertActionStyleCancel handler:nil];
@@ -212,7 +210,7 @@ void showVirtualCamPanel(void) {
     });
 }
 
-#pragma mark - 修复版悬浮球
+#pragma mark - 悬浮球
 static void setupFloatBall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (_floatWindow) {
@@ -268,7 +266,7 @@ static void delayed_init()
 
 __attribute__((constructor))
 static void init_plugin() {
-    NSLog(@"[VirtualCam] ✅ Dylib loaded — TrollFools ready");
+    NSLog(@"[VirtualCam] ✅ Dylib loaded — TrollFools ready【测试蓝色帧】");
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         delayed_init();
     });
