@@ -49,10 +49,8 @@ static GetFrame *_inst;
         return NO;
     }
     self.assetReader = [[AVAssetReader alloc] initWithAsset:asset error:nil];
-    NSDictionary *outputOpts = @{
-        (__bridge NSString *)kCVPixelBufferPixelFormatTypeKey:@(kCVPixelFormatType_32BGRA)
-    };
-    self.trackOutput = [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:track outputSettings:outputOpts];
+    // 删除CoreVideo相关像素格式参数，不再依赖CoreVideo框架
+    self.trackOutput = [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:track outputSettings:nil];
     if ([self.assetReader canAddOutput:self.trackOutput]) {
         [self.assetReader addOutput:self.trackOutput];
     }
