@@ -4,6 +4,10 @@
 #import <CoreMedia/CoreMedia.h>
 #include <objc/runtime.h>
 
+// ========== 函数前置声明，解决implicit declaration报错 ==========
+void showVirtualCamPanel(void);
+static UIViewController* getTopViewController(void);
+
 @interface NSObject (HookAdditions)
 - (void)hook_setSampleBufferDelegate:(id)delegate queue:(dispatch_queue_t)queue;
 @end
