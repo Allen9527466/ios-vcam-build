@@ -1,38 +1,34 @@
-name: build
+name: Build FakeCam Dylib
 on:
   push:
-    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Compile & Link
+      - name: Setup Theos
         run: |
-          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
-          echo "SDK_PATH=$SDK_PATH" >> $GITHUB_ENV
-          xcrun clang -arch arm64 \
-          -ObjC \
-          -isysroot $SDK_PATH \
-          -mios-version-min=14.0 \
-          -fobjc-arc \
-          -dynamiclib main.m VirtualVideo.m \
-          -o libXUUZ.dylib \
-          -framework UIKit \
-          -framework AVFoundation \
-          -framework CoreMedia \
-          -framework CoreVideo \
-          -framework Foundation \
-          -framework QuartzCore \
-          -framework CoreGraphics \
-          -framework MobileCoreServices \
-          -framework PhotosUI
+          git clone --recursive https://github.com/theos/theos ~/theos
+          echo "export THEOS=$HOME/theos" >> ~/.zshrc
+          source ~/.zshrc
+          brew install ldid
 
-      - name: Upload Artifact
+      - name: Download iPhoneOS14.0 SDK
+        run: |
+          cd $THEOS/sdks
+          curl -L https://github.com/theos/sdks/raw/master/iPhoneOS14.0.sdk.tar.xz -o sdk.tar.xz
+          tar -xf sdk.tar.xz
+
+      - name: Compile Tweak
+        run: |
+          source ~/.zshrc
+          make package
+
+      - name: Upload Dylib Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: libXUUZ
-          path: libXUUZ.dylib
+          name: FakeCamDylib
+          path: .theos/obj/arm64/FakeCam.dylib
