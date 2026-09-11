@@ -1,119 +1,275 @@
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <CoreMedia/CoreMedia.h>
 #import <CoreVideo/CoreVideo.h>
-#import <CoreGraphics/CoreGraphics.h>
+#import <MobileCoreServices/MobileCoreServices.h>
+#import <PhotosUI/PhotosUI.h>
+#import <objc/runtime.h>
 
-static BOOL g_replaceEnabled = NO;
-static NSURL *g_selectedVideoURL = nil;
-static AVAssetReader *g_assetReader = nil;
-static dispatch_queue_t g_videoQueue = nil;
+@interface GetFrame : NSObject
++ (CMSampleBufferRef)replaceSampleBuffer:(CMSampleBufferRef)sampleBuffer mirror:(BOOL)mirror;
++ (instancetype)sharedInstance;
+@end
 
-__attribute__((visibility("default")))
-void setVirtualVideoEnabled(BOOL enabled) {
-    g_replaceEnabled = enabled;
-    NSLog(@"[VirtualVideo] setVirtualVideoEnabled:%d", enabled);
+@implementation GetFrame
+
++ (instancetype)sharedInstance {
+    static GetFrame *instance = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        instance = [[GetFrame alloc] init];
+    });
+    return instance;
 }
 
-__attribute__((visibility("default")))
++ (CMSampleBufferRef)replaceSampleBuffer:(CMSampleBufferRef)sampleBuffer mirror:(BOOL)mirror {
+    return sampleBuffer;
+}
+
+@end
+
+static BOOL g_replaceEnabled = NO;
+static NSString *g_selectedVideoPath = nil;
+
+void setVirtualVideoEnabled(BOOL enabled) {
+    g_replaceEnabled = enabled;
+}
+
 BOOL isVirtualVideoEnabled(void) {
     return g_replaceEnabled;
 }
 
-__attribute__((visibility("default")))
-void setSelectedVideoPath(NSString *videoPath) {
-    if (!videoPath) {
-        g_selectedVideoURL = nil;
-        g_assetReader = nil;
+void setSelectedVideoPath(NSString *path) {
+    g_selectedVideoPath = path;
+}
+
+NSString *getSelectedVideoPath(void) {
+    return g_selectedVideoPath;
+}
+
+#pragma mark - AVCaptureOutput Hook
+@interface AVCaptureOutput (FakeToolsHook)
+- (void)ft_captureOutput:(AVCaptureOutput *)output didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer fromConnection:(AVCaptureConnection *)connection;
+@end
+
+@implementation AVCaptureOutput (FakeToolsHook)
+
+- (void)ft_captureOutput:(AVCaptureOutput *)output didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer fromConnection:(AVCaptureConnection *)connection {
+    if (!g_replaceEnabled || !g_selectedVideoPath) {
+        [self ft_captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
         return;
     }
-    g_selectedVideoURL = [NSURL fileURLWithPath:videoPath];
-    g_assetReader = nil;
-    NSLog(@"[VirtualVideo] video path set: %@", videoPath);
+    
+    CMSampleBufferRef newFrame = [GetFrame replaceSampleBuffer:sampleBuffer mirror:NO];
+    [self ft_captureOutput:output didOutputSampleBuffer:newFrame fromConnection:connection];
 }
 
-__attribute__((visibility("default")))
-NSString *getSelectedVideoPath(void) {
-    return g_selectedVideoURL.path;
-}
+@end
 
-static CMSampleBufferRef createBlackSampleBuffer(CMSampleBufferRef originalBuffer) {
-    if (!originalBuffer) return NULL;
-    CVPixelBufferRef pixelBuffer = CMSampleBufferGetImageBuffer(originalBuffer);
-    if (!pixelBuffer) return NULL;
+#pragma mark - 悬浮菜单窗口
+@interface CustomMenuWindow : UIWindow <UIGestureRecognizerDelegate, PHPickerViewControllerDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate>
+@property (nonatomic, strong) UIButton *floatBtn;
+@end
 
-    size_t width = CVPixelBufferGetWidth(pixelBuffer);
-    size_t height = CVPixelBufferGetHeight(pixelBuffer);
-    CVPixelBufferRef newPixelBuffer = NULL;
-    NSDictionary *attrs = @{(__bridge NSString *)kCVPixelBufferIOSurfacePropertiesKey: @{}};
-    CVReturn ret = CVPixelBufferCreate(kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA, (__bridge CFDictionaryRef)attrs, &newPixelBuffer);
-    if (ret != kCVReturnSuccess) return NULL;
+@implementation CustomMenuWindow
 
-    CVPixelBufferLockBaseAddress(newPixelBuffer,0);
-    void *baseAddr = CVPixelBufferGetBaseAddress(newPixelBuffer);
-    size_t bytesPerRow = CVPixelBufferGetBytesPerRow(newPixelBuffer);
-    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-    CGContextRef ctx = CGBitmapContextCreate(baseAddr, width, height, 8, bytesPerRow, cs, kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
-    CGColorSpaceRelease(cs);
-    if(ctx){
-        CGContextSetRGBFillColor(ctx,0,0,0,1);
-        CGContextFillRect(ctx,CGRectMake(0,0,width,height));
-        CGContextRelease(ctx);
+- (instancetype)init {
+    UIWindowScene *scene = nil;
+    for (UIWindowScene *s in [UIApplication sharedApplication].connectedScenes) {
+        if (s.activationState == UISceneActivationStateForegroundActive) {
+            scene = s;
+            break;
+        }
     }
-    CVPixelBufferUnlockBaseAddress(newPixelBuffer,0);
-
-    CMVideoFormatDescriptionRef fmt = NULL;
-    CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault, newPixelBuffer, &fmt);
-    CMSampleTimingInfo timing;
-    CMSampleBufferGetSampleTimingInfo(originalBuffer,0,&timing);
-    CMSampleBufferRef sbOut = NULL;
-    CMSampleBufferCreateForImageBuffer(kCFAllocatorDefault, newPixelBuffer, YES, NULL, NULL, fmt, &timing, &sbOut);
-    CFRelease(fmt);
-    CVPixelBufferRelease(newPixelBuffer);
-    return sbOut;
+    if (scene) {
+        self = [super initWithWindowScene:scene];
+    } else {
+        self = [super init];
+    }
+    
+    if (self) {
+        CGFloat btnSize = 44;
+        self.frame = CGRectMake(30, 300, btnSize, btnSize);
+        self.windowLevel = UIWindowLevelAlert + 999;
+        self.backgroundColor = [UIColor clearColor];
+        self.hidden = NO;
+        
+        self.floatBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+        self.floatBtn.frame = self.bounds;
+        self.floatBtn.backgroundColor = [UIColor colorWithRed:0.0 green:0.45 blue:1.0 alpha:1];
+        self.floatBtn.layer.cornerRadius = btnSize/2;
+        [self.floatBtn setTitle:@"X" forState:UIControlStateNormal];
+        [self.floatBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        self.floatBtn.titleLabel.font = [UIFont boldSystemFontOfSize:18];
+        [self.floatBtn addTarget:self action:@selector(showMenu) forControlEvents:UIControlEventTouchUpInside];
+        [self addSubview:self.floatBtn];
+        
+        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(drag:)];
+        pan.delegate = self;
+        [self.floatBtn addGestureRecognizer:pan];
+    }
+    return self;
 }
 
-static void resetAssetReader(void) {
-    if(!g_selectedVideoURL) return;
-    AVAsset *asset = [NSURL fileURLWithPath:g_selectedVideoURL];
-    AVAssetTrack *track = [[asset.tracks filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"mediaType == %@",AVMediaTypeVideo]] firstObject];
-    if(!track) return;
-    NSDictionary *outSetting = @{(id)kCVPixelBufferPixelFormatTypeKey:@(kCVPixelFormatType_32BGRA)};
-    NSError *err;
-    g_assetReader = [[AVAssetReader alloc] initWithAsset:asset error:&err];
-    if(!g_assetReader || err) return;
-    AVAssetReaderTrackOutput *out = [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:track outputSettings:outSetting];
-    [g_assetReader addOutput:out];
-    [g_assetReader startReading];
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer {
+    return YES;
 }
 
-static CMSampleBufferRef readNextVideoFrame(void) {
-    if(!g_selectedVideoURL) return NULL;
-    __block CMSampleBufferRef buf = NULL;
-    dispatch_sync(g_videoQueue, ^{
-        if(!g_assetReader){
-            resetAssetReader();
-        }
-        if(!g_assetReader) return;
-        AVAssetReaderTrackOutput *out = (AVAssetReaderTrackOutput *)g_assetReader.outputs.firstObject;
-        buf = [out copyNextSampleBuffer];
-        if(!buf){
-            [g_assetReader cancelReading];
-            g_assetReader = nil;
-            resetAssetReader();
-            if(g_assetReader){
-                AVAssetReaderTrackOutput *out2 = (AVAssetReaderTrackOutput *)g_assetReader.outputs.firstObject;
-                buf = [out2 copyNextSampleBuffer];
+- (void)drag:(UIPanGestureRecognizer *)ges {
+    CGPoint trans = [ges translationInView:self];
+    self.center = CGPointMake(self.center.x + trans.x, self.center.y + trans.y);
+    [ges setTranslation:CGPointZero inView:self];
+}
+
+- (void)showMenu {
+    UIViewController *vc = [[UIViewController alloc] init];
+    vc.modalPresentationStyle = UIModalPresentationPageSheet;
+    vc.view.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.85];
+    
+    UIView *panel = [[UIView alloc] initWithFrame:CGRectMake(20, 80, vc.view.bounds.size.width - 40, 380)];
+    panel.backgroundColor = [UIColor colorWithRed:0.94 green:0.97 blue:1.0 alpha:0.96];
+    panel.layer.cornerRadius = 16;
+    [vc.view addSubview:panel];
+    
+    UILabel *titleLab = [[UILabel alloc] initWithFrame:CGRectMake(0, 20, panel.bounds.size.width, 30)];
+    titleLab.text = @"虚拟工具箱";
+    titleLab.font = [UIFont boldSystemFontOfSize:18];
+    titleLab.textAlignment = NSTextAlignmentCenter;
+    [panel addSubview:titleLab];
+    
+    UIButton *btnClose = [[UIButton alloc] initWithFrame:CGRectMake(panel.bounds.size.width - 75, 20, 60, 30)];
+    [btnClose setTitle:@"关闭" forState:UIControlStateNormal];
+    [btnClose setTitleColor:[UIColor systemBlueColor] forState:UIControlStateNormal];
+    [btnClose addTarget:vc action:@selector(dismissViewControllerAnimated:completion:) forControlEvents:UIControlEventTouchUpInside];
+    [panel addSubview:btnClose];
+    
+    UILabel *infoLab = [[UILabel alloc] initWithFrame:CGRectMake(20, 70, panel.bounds.size.width - 40, 90)];
+    infoLab.numberOfLines = 0;
+    infoLab.text = @"XUUᶻ\n插件版本V5.0\n本插件完全免费分享!\n如因本插件产生的任何!\n利益纠纷将由使用者自行承担!";
+    [panel addSubview:infoLab];
+    
+    UILabel *labVirtualVideo = [[UILabel alloc] initWithFrame:CGRectMake(20, 170, panel.bounds.size.width - 40, 30)];
+    labVirtualVideo.text = @"虚拟视频";
+    labVirtualVideo.font = [UIFont boldSystemFontOfSize:17];
+    [panel addSubview:labVirtualVideo];
+    
+    UIButton *btnSelectVideo = [[UIButton alloc] initWithFrame:CGRectMake(20, 210, panel.bounds.size.width - 40, 44)];
+    btnSelectVideo.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
+    btnSelectVideo.titleLabel.font = [UIFont systemFontOfSize:16];
+    [btnSelectVideo setTitle:@"· 选择视频" forState:UIControlStateNormal];
+    [btnSelectVideo setTitleColor:[UIColor blackColor] forState:UIControlStateNormal];
+    [btnSelectVideo addTarget:self action:@selector(pickVideo) forControlEvents:UIControlEventTouchUpInside];
+    [panel addSubview:btnSelectVideo];
+    
+    UILabel *labelSelectedTip = [[UILabel alloc] initWithFrame:CGRectMake(panel.bounds.size.width - 110, 210, 90, 44)];
+    labelSelectedTip.tag = 1001;
+    labelSelectedTip.text = g_selectedVideoPath ? @"已选择" : @"未选择";
+    labelSelectedTip.textAlignment = NSTextAlignmentRight;
+    labelSelectedTip.font = [UIFont systemFontOfSize:14];
+    [panel addSubview:labelSelectedTip];
+    
+    UIButton *btnToggleReplace = [[UIButton alloc] initWithFrame:CGRectMake(20, 260, panel.bounds.size.width - 40, 44)];
+    btnToggleReplace.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
+    btnToggleReplace.titleLabel.font = [UIFont systemFontOfSize:16];
+    [btnToggleReplace setTitle:@"· 禁用替换" forState:UIControlStateNormal];
+    [btnToggleReplace setTitleColor:[UIColor blackColor] forState:UIControlStateNormal];
+    [btnToggleReplace addTarget:self action:@selector(toggleReplace) forControlEvents:UIControlEventTouchUpInside];
+    [panel addSubview:btnToggleReplace];
+    
+    UILabel *labelReplaceTip = [[UILabel alloc] initWithFrame:CGRectMake(panel.bounds.size.width - 110, 260, 90, 44)];
+    labelReplaceTip.tag = 1002;
+    labelReplaceTip.text = g_replaceEnabled ? @"替换中" : @"已禁用";
+    labelReplaceTip.textAlignment = NSTextAlignmentRight;
+    labelReplaceTip.font = [UIFont systemFontOfSize:14];
+    [panel addSubview:labelReplaceTip];
+    
+    UIViewController *topVC = [UIApplication sharedApplication].keyWindow.rootViewController;
+    [topVC presentViewController:vc animated:YES completion:nil];
+}
+
+- (void)pickVideo {
+    if (@available(iOS 14, *)) {
+        PHPickerConfiguration *config = [[PHPickerConfiguration alloc] init];
+        config.filter = [PHPickerFilter videosFilter];
+        config.selectionLimit = 1;
+        PHPickerViewController *picker = [[PHPickerViewController alloc] initWithConfiguration:config];
+        picker.delegate = self;
+        UIViewController *topVC = [UIApplication sharedApplication].keyWindow.rootViewController;
+        [topVC presentViewController:picker animated:YES completion:nil];
+    } else {
+        UIImagePickerController *picker = [[UIImagePickerController alloc] init];
+        picker.sourceType = UIImagePickerControllerSourceTypePhotoLibrary;
+        picker.mediaTypes = @[(NSString *)kUTTypeMovie];
+        picker.delegate = self;
+        UIViewController *topVC = [UIApplication sharedApplication].keyWindow.rootViewController;
+        [topVC presentViewController:picker animated:YES completion:nil];
+    }
+}
+
+- (void)toggleReplace {
+    g_replaceEnabled = !g_replaceEnabled;
+    NSLog(@"[FakeTools] replace: %@", g_replaceEnabled ? @"ON" : @"OFF");
+}
+
+#pragma mark - PHPicker Delegate
+- (void)picker:(PHPickerViewController *)picker didFinishPicking:(NSArray<PHPickerResult *> *)results API_AVAILABLE(ios(14)) {
+    [picker dismissViewControllerAnimated:YES completion:nil];
+    PHPickerResult *result = results.firstObject;
+    if (!result) return;
+    
+    NSItemProvider *provider = result.itemProvider;
+    if ([provider hasItemConformingToTypeIdentifier:(NSString *)kUTTypeMovie]) {
+        [provider loadFileRepresentationForTypeIdentifier:(NSString *)kUTTypeMovie completionHandler:^(NSURL * _Nullable url, NSError * _Nullable error) {
+            if (url) {
+                NSString *tmpPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"vcam_selected.mp4"];
+                NSURL *tmpURL = [NSURL fileURLWithPath:tmpPath];
+                [[NSFileManager defaultManager] removeItemAtURL:tmpURL error:nil];
+                [[NSFileManager defaultManager] copyItemAtURL:url toURL:tmpURL error:nil];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    g_selectedVideoPath = tmpPath;
+                });
             }
-        }
-    });
-    return buf;
+        }];
+    }
 }
 
-void virtualVideoSetupHook(void)
-{
+#pragma mark - UIImagePicker Delegate
+- (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary<UIImagePickerControllerInfoKey,id> *)info {
+    NSURL *videoUrl = info[UIImagePickerControllerMediaURL];
+    if (videoUrl) {
+        g_selectedVideoPath = videoUrl.path;
+    }
+    [picker dismissViewControllerAnimated:YES completion:nil];
+}
+
+- (void)imagePickerControllerDidCancel:(UIImagePickerController *)picker {
+    [picker dismissViewControllerAnimated:YES completion:nil];
+}
+
+@end
+
+static CustomMenuWindow *g_menuWin = nil;
+
+__attribute__((constructor))
+static void fakeToolsEntry(void) {
     @autoreleasepool {
-        g_videoQueue = dispatch_queue_create("com.virtualvideo.queue",DISPATCH_QUEUE_SERIAL);
-        NSLog(@"[VirtualVideo] stub hook, no swizzle (crash safe)");
+        NSLog(@"FakeTools loaded");
+        
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidFinishLaunchingNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
+            NSLog(@"FakeTools app launched, init UI + hook");
+            
+            g_menuWin = [[CustomMenuWindow alloc] init];
+            
+            Class cls = objc_getClass("AVCaptureOutput");
+            SEL origSel = @selector(captureOutput:didOutputSampleBuffer:fromConnection:);
+            SEL newSel = @selector(ft_captureOutput:didOutputSampleBuffer:fromConnection:);
+            Method origM = class_getInstanceMethod(cls, origSel);
+            Method newM = class_getInstanceMethod(cls, newSel);
+            if (origM && newM) {
+                method_exchangeImplementations(origM, newM);
+                NSLog(@"FakeTools hook installed");
+            }
+        }];
     }
 }
