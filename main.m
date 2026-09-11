@@ -222,14 +222,16 @@ static UIWindow *getKeyWindow(void) {
 
 static CustomMenuWindow *g_menuWin = nil;
 
+// ✅ constructor只做监听通知，不做任何UI/hook
 __attribute__((constructor))
 static void tweakMainEntry(void)
 {
     @autoreleasepool {
-        NSLog(@"XUUz V5.0 虚拟工具箱加载成功");
-        dispatch_async(dispatch_get_main_queue(), ^{
+        NSLog(@"XUUz V5.0 dylib loaded, waiting app launch finish");
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidFinishLaunchingNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
+            NSLog(@"XUUz App didFinishLaunching, init UI + hook");
             g_menuWin = [[CustomMenuWindow alloc] init];
             virtualVideoSetupHook();
-        });
+        }];
     }
 }
