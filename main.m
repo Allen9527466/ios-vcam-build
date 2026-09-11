@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <CoreVideo/CoreVideo.h>
 #import <UIKit/UIKit.h>
+#import <substrate.h>
 
 static BOOL g_virtualCamEnable = NO;
 static OSStatus (*orig_CVPixelBufferLockBaseAddress)(CVPixelBufferRef buffer, CVPixelBufferLockFlags lockFlags);
@@ -13,13 +14,13 @@ OSStatus hook_CVPixelBufferLockBaseAddress(CVPixelBufferRef buffer, CVPixelBuffe
     {
         size_t w = CVPixelBufferGetWidth(buffer);
         size_t h = CVPixelBufferGetHeight(buffer);
-        //过滤掉小贴图，只处理大画面
+        //过滤小贴图，只处理大画面
         if(w >= 320 && h >=320){
             void *base = CVPixelBufferGetBaseAddress(buffer);
             size_t stride = CVPixelBufferGetBytesPerRow(buffer);
             uint32_t *ptr = (uint32_t*)base;
             for(int i=0; i < w*h; i++){
-                ptr[i] = 0xFFFF0000; // BGRA 蓝色
+                ptr[i] = 0xFFFF0000; // BGRA蓝色
             }
         }
     }
@@ -67,19 +68,13 @@ OSStatus hook_CVPixelBufferLockBaseAddress(CVPixelBufferRef buffer, CVPixelBuffe
 
 static VCWindow *vcWin;
 
-//fishhook注册钩子
-void fishhook_register()
-{
-    extern void rebind_symbols(struct rebinding rebindings[], size_t rebindings_nel);
-    struct rebinding rebind[] = {
-        {"CVPixelBufferLockBaseAddress", hook_CVPixelBufferLockBaseAddress, (void**)&orig_CVPixelBufferLockBaseAddress}
-    };
-    rebind_symbols(rebind, 1);
-}
-
 __attribute__((constructor))
 void lib_main() {
-    fishhook_register();
+    // Substrate MSHookFunction 直接hook，不再需要fishhook
+    MSHookFunction((void *)CVPixelBufferLockBaseAddress,
+                   (void *)hook_CVPixelBufferLockBaseAddress,
+                   (void **)&orig_CVPixelBufferLockBaseAddress);
+
     dispatch_async(dispatch_get_main_queue(), ^{
         vcWin = [[VCWindow alloc] init];
     });
