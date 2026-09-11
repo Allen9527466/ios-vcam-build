@@ -9,28 +9,30 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout source
-      uses: actions/checkout@v4
+      - name: Checkout source code
+        uses: actions/checkout@v4
 
-    - name: Setup Theos
-      uses: theos/setup-theos@v1
-      with:
-        theos-version: latest
+      - name: Setup Theos environment
+        uses: Randomblock1/theos-action@v1
+        with:
+          theos-dir: ${{ github.workspace }}/theos
+          theos-src: https://github.com/theos/theos.git
+          theos-sdks: https://github.com/theos/sdks.git
 
-    - name: Build Tweak
-      shell: bash
-      run: |
-        export THEOS=$HOME/theos
-        set -x
-        # 不截断clang输出，打印全部编译信息
-        make clean
-        make TARGET=iphone:clang:latest:14.0 2>&1 | tee build_log.txt
+      - name: Compile Tweak & Save full log
+        shell: bash
+        run: |
+          export THEOS=${{ github.workspace }}/theos
+          export PATH="$THEOS/bin:$PATH"
+          set -o pipefail
+          make clean
+          make TARGET=iphone:clang:latest:14.0 2>&1 | tee build_full_log.txt
 
-    - name: Show full compile log
-      run: cat build_log.txt
+      - name: Print full clang compile log
+        run: cat build_full_log.txt
 
-    - name: Upload dylib artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: FakeCam-Dylib
-        path: .theos/obj/debug/arm64/FakeCam.dylib
+      - name: Upload compiled FakeCam.dylib
+        uses: actions/upload-artifact@v4
+        with:
+          name: FakeCam-Compiled-Dylib
+          path: .theos/obj/debug/arm64/FakeCam.dylib
