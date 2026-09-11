@@ -15,7 +15,13 @@ jobs:
           git clone --recursive https://github.com/theos/theos $THEOS
           brew install ldid
           
-          # 回到源码目录，theos会自动拉取需要的SDK
+          # 创建sdks目录，下载iPhoneOS15.0 SDK（这个链接稳定可用）
+          mkdir -p $THEOS/sdks
+          cd $THEOS/sdks
+          curl -L https://github.com/theos/sdks/raw/master/iPhoneOS15.0.sdk.tar.xz -o iPhoneOS15.0.sdk.tar.xz
+          tar -xf iPhoneOS15.0.sdk.tar.xz
+          
+          # 返回源码目录编译
           cd $GITHUB_WORKSPACE
           make package
 
