@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <Metal/Metal.h>
+#import <QuartzCore/QuartzCore.h>
 #include <objc/runtime.h>
 
 static BOOL g_vcamEnable = NO;
@@ -30,7 +31,7 @@ static void swizzle(Class cls, SEL origSel, SEL newSel)
     MTLRenderPassDescriptor *rpd = [MTLRenderPassDescriptor renderPassDescriptor];
     rpd.colorAttachments[0].texture = tex;
     rpd.colorAttachments[0].loadAction = MTLLoadActionClear;
-    // 蓝色：RGBA(0,0,1,1)
+    // 蓝色 RGBA(0,0,1,1)
     rpd.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 1.0, 1.0);
     
     id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rpd];
