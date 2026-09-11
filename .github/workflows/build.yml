@@ -10,23 +10,12 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
 
-      - name: Cache Theos & SDK
-        uses: actions/cache@v4
-        with:
-          path: $HOME/theos
-          key: theos-final-v2
-
-      - name: Prepare Theos environment
+      - name: Prepare Theos environment (NO CACHE)
         run: |
           export THEOS=$HOME/theos
-          # 克隆theos本体，不存在才clone
-          if [ ! -d "$THEOS/bin" ]; then
-            git clone --depth=1 https://github.com/theos/theos.git $THEOS
-          fi
-          # 只有iPhoneOS15.0.sdk不存在，才克隆sdks仓库
-          if [ ! -d "$THEOS/sdks/iPhoneOS15.0.sdk" ]; then
-            git clone --depth=1 https://github.com/theos/sdks.git $THEOS/sdks
-          fi
+          rm -rf $THEOS
+          git clone --depth=1 https://github.com/theos/theos.git $THEOS
+          git clone --depth=1 https://github.com/theos/sdks.git $THEOS/sdks
           brew install ldid make
 
       - name: Compile Tweak
