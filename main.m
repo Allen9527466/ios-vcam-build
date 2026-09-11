@@ -74,7 +74,8 @@ static id<MTLTexture> createTextureFromImage(UIImage *img, id<MTLDevice> dev)
         CGColorSpaceRelease(colorSpace);
         return nil;
     }
-    CGBitmapInfo bitmapInfo = kCGImageAlphaPremultipliedLast;
+    // 修复枚举警告
+    CGBitmapInfo bitmapInfo = kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big;
     CGContextRef ctx = CGBitmapContextCreate(bitmapData, w, h, 8, w*4, colorSpace, bitmapInfo);
     CGColorSpaceRelease(colorSpace);
     if(!ctx)
@@ -120,16 +121,20 @@ static void loadBackgroundImage()
     }
 }
 
+// 修复iOS15 windows废弃警告
 static BOOL isCameraRecordingPage()
 {
     @autoreleasepool {
         UIWindow *keyWin = nil;
-        for(UIWindow *w in [UIApplication sharedApplication].windows)
-        {
-            if(w.isKeyWindow)
-            {
-                keyWin = w;
-                break;
+        for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes) {
+            if (scene.activationState == UISceneActivationStateForegroundActive) {
+                for (UIWindow *w in scene.windows) {
+                    if (w.isKeyWindow) {
+                        keyWin = w;
+                        break;
+                    }
+                }
+                if(keyWin) break;
             }
         }
         if(!keyWin) return NO;
