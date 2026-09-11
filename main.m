@@ -2,8 +2,26 @@
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <CoreMedia/CoreMedia.h>
-#import <CoreVideo/CoreVideo.h>
 #include <objc/runtime.h>
+
+// 弱声明CoreVideo函数，不再需要#import <CoreVideo/CoreVideo.h>
+__attribute__((weak_import))
+void CVPixelBufferLockBaseAddress(void *pixelBuffer, int lockFlags);
+
+__attribute__((weak_import))
+void CVPixelBufferUnlockBaseAddress(void *pixelBuffer, int unlockFlags);
+
+__attribute__((weak_import))
+void* CVPixelBufferGetBaseAddress(void *pixelBuffer);
+
+__attribute__((weak_import))
+size_t CVPixelBufferGetBytesPerRow(void *pixelBuffer);
+
+__attribute__((weak_import))
+size_t CVPixelBufferGetHeight(void *pixelBuffer);
+
+__attribute__((weak_import))
+void* CMSampleBufferGetImageBuffer(CMSampleBufferRef sbuf);
 
 // ========== 前置声明 ==========
 @class FloatBallTarget;
@@ -67,12 +85,11 @@ static UIViewController* getTopViewController(void)
 
 - (void)captureOutput:(AVCaptureVideoDataOutput *)output didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer fromConnection:(AVCaptureConnection *)connection {
     if (!g_virtualCamEnable) {
-        // 关闭：透传真实摄像头
         [_originalDelegate captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
         return;
     }
 
-    CVPixelBufferRef pixelBuf = CMSampleBufferGetImageBuffer(sampleBuffer);
+    void *pixelBuf = CMSampleBufferGetImageBuffer(sampleBuffer);
     if (!pixelBuf) {
         [_originalDelegate captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
         return;
@@ -83,7 +100,7 @@ static UIViewController* getTopViewController(void)
     size_t bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuf);
     size_t height = CVPixelBufferGetHeight(pixelBuf);
 
-    // BGRA 蓝色填充 B=255 G=0 R=0 A=255
+    // BGRA 蓝色填充
     for(size_t y = 0; y < height; y++){
         uint8_t *row = (uint8_t*)baseAddr + y * bytesPerRow;
         for(size_t x = 0; x < bytesPerRow; x +=4){
