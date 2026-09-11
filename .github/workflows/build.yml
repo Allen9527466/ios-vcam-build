@@ -15,6 +15,8 @@ jobs:
           export THEOS=$HOME/theos
           rm -rf $THEOS
           git clone --depth=1 https://github.com/theos/theos.git $THEOS
+          # 删除theos自带的空sdks目录，才能克隆sdks仓库
+          rm -rf $THEOS/sdks
           git clone --depth=1 https://github.com/theos/sdks.git $THEOS/sdks
           brew install ldid make
 
