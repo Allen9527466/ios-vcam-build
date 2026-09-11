@@ -1,10 +1,14 @@
-ARCHS = arm64
-TARGET = iphone:clang:15.0:14.0
-INSTALL_PROGRAM = NO
+ARCHS = arm64 arm64e
+TARGET = iphone:clang:15.0:15.0
+
+INSTALL_TARGET_PROCESSES = Aweme
+
+include $(THEOS)/makefiles/common.mk
+
+DYLIB_NAME = VirtualCam
 
 VirtualCam_FILES = main.m
 VirtualCam_CFLAGS = -fobjc-arc
-VirtualCam_FRAMEWORKS = UIKit Foundation AVFoundation CoreMedia
-VirtualCam_LDFLAGS = -ldl
+VirtualCam_FRAMEWORKS = CoreVideo UIKit AVFoundation
 
 include $(THEOS_MAKE_PATH)/dylib.mk
