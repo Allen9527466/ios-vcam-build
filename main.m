@@ -127,7 +127,7 @@ NSString *getSelectedVideoPath(void) {
     vc.modalPresentationStyle = UIModalPresentationPageSheet;
     vc.view.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.85];
     
-    UIView *panel = [[UIView alloc] initWithFrame:CGRectMake(20, 80, vc.view.bounds.size.width - 40, 380)];
+    UIView *panel = [[UIView alloc] initWithFrame:CGRectMake(20, 80, [UIScreen mainScreen].bounds.size.width - 40, 380)];
     panel.backgroundColor = [UIColor colorWithRed:0.94 green:0.97 blue:1.0 alpha:0.96];
     panel.layer.cornerRadius = 16;
     [vc.view addSubview:panel];
@@ -141,12 +141,12 @@ NSString *getSelectedVideoPath(void) {
     UIButton *btnClose = [[UIButton alloc] initWithFrame:CGRectMake(panel.bounds.size.width - 75, 20, 60, 30)];
     [btnClose setTitle:@"关闭" forState:UIControlStateNormal];
     [btnClose setTitleColor:[UIColor systemBlueColor] forState:UIControlStateNormal];
-    [btnClose addTarget:vc action:@selector(dismissViewControllerAnimated:completion:) forControlEvents:UIControlEventTouchUpInside];
+    [btnClose addTarget:self action:@selector(closePanel:) forControlEvents:UIControlEventTouchUpInside];
     [panel addSubview:btnClose];
     
     UILabel *infoLab = [[UILabel alloc] initWithFrame:CGRectMake(20, 70, panel.bounds.size.width - 40, 90)];
     infoLab.numberOfLines = 0;
-    infoLab.text = @"XUUᶻ\n插件版本V5.0\n本插件完全免费分享!\n如因本插件产生的任何!\n利益纠纷将由使用者自行承担!";
+    infoLab.text = @"XUUᶻ\n插件版本V5.0\n本插件完全免费分享!\n如因本插件产生的任何利益纠纷将由使用者自行承担!";
     [panel addSubview:infoLab];
     
     UILabel *labVirtualVideo = [[UILabel alloc] initWithFrame:CGRectMake(20, 170, panel.bounds.size.width - 40, 30)];
@@ -186,6 +186,11 @@ NSString *getSelectedVideoPath(void) {
     
     UIViewController *topVC = [UIApplication sharedApplication].keyWindow.rootViewController;
     [topVC presentViewController:vc animated:YES completion:nil];
+}
+
+- (void)closePanel:(UIButton *)sender {
+    UIViewController *vc = sender.viewController;
+    [vc dismissViewControllerAnimated:YES completion:nil];
 }
 
 - (void)pickVideo {
