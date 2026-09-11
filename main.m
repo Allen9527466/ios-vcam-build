@@ -3,22 +3,33 @@
 #import <AVFoundation/AVFoundation.h>
 #import <CoreMedia/CoreMedia.h>
 #include <objc/runtime.h>
+#include <dlfcn.h>
 
-// 只弱声明CVPixelBuffer函数，CMSampleBufferGetImageBuffer由CoreMedia头提供
-__attribute__((weak_import))
-void CVPixelBufferLockBaseAddress(void *pixelBuffer, int lockFlags);
+typedef void* CVPixelBufferRef;
 
-__attribute__((weak_import))
-void CVPixelBufferUnlockBaseAddress(void *pixelBuffer, int unlockFlags);
+typedef void (*CVPixelBufferLockBaseAddressFunc)(CVPixelBufferRef, int);
+typedef void (*CVPixelBufferUnlockBaseAddressFunc)(CVPixelBufferRef, int);
+typedef void* (*CVPixelBufferGetBaseAddressFunc)(CVPixelBufferRef);
+typedef size_t (*CVPixelBufferGetBytesPerRowFunc)(CVPixelBufferRef);
+typedef size_t (*CVPixelBufferGetHeightFunc)(CVPixelBufferRef);
 
-__attribute__((weak_import))
-void* CVPixelBufferGetBaseAddress(void *pixelBuffer);
+static CVPixelBufferLockBaseAddressFunc fpLock = NULL;
+static CVPixelBufferUnlockBaseAddressFunc fpUnlock = NULL;
+static CVPixelBufferGetBaseAddressFunc fpBaseAddr = NULL;
+static CVPixelBufferGetBytesPerRowFunc fpBPR = NULL;
+static CVPixelBufferGetHeightFunc fpHeight = NULL;
 
-__attribute__((weak_import))
-size_t CVPixelBufferGetBytesPerRow(void *pixelBuffer);
+static void loadCoreVideoSymbols(void)
+{
+    void *cvHandle = dlopen("/System/Library/Frameworks/CoreVideo.framework/CoreVideo", RTLD_LAZY);
+    if (!cvHandle) return;
 
-__attribute__((weak_import))
-size_t CVPixelBufferGetHeight(void *pixelBuffer);
+    fpLock = dlsym(cvHandle, "CVPixelBufferLockBaseAddress");
+    fpUnlock = dlsym(cvHandle, "CVPixelBufferUnlockBaseAddress");
+    fpBaseAddr = dlsym(cvHandle, "CVPixelBufferGetBaseAddress");
+    fpBPR = dlsym(cvHandle, "CVPixelBufferGetBytesPerRow");
+    fpHeight = dlsym(cvHandle, "CVPixelBufferGetHeight");
+}
 
 // ========== 前置声明 ==========
 @class FloatBallTarget;
@@ -81,7 +92,7 @@ static UIViewController* getTopViewController(void)
 }
 
 - (void)captureOutput:(AVCaptureVideoDataOutput *)output didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer fromConnection:(AVCaptureConnection *)connection {
-    if (!g_virtualCamEnable) {
+    if (!g_virtualCamEnable || !fpLock) {
         [_originalDelegate captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
         return;
     }
@@ -92,10 +103,10 @@ static UIViewController* getTopViewController(void)
         return;
     }
 
-    CVPixelBufferLockBaseAddress(pixelBuf,0);
-    void *baseAddr = CVPixelBufferGetBaseAddress(pixelBuf);
-    size_t bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuf);
-    size_t height = CVPixelBufferGetHeight(pixelBuf);
+    fpLock(pixelBuf,0);
+    void *baseAddr = fpBaseAddr(pixelBuf);
+    size_t bytesPerRow = fpBPR(pixelBuf);
+    size_t height = fpHeight(pixelBuf);
 
     // BGRA 蓝色填充
     for(size_t y = 0; y < height; y++){
@@ -107,7 +118,7 @@ static UIViewController* getTopViewController(void)
             row[x+3] = 255;
         }
     }
-    CVPixelBufferUnlockBaseAddress(pixelBuf,0);
+    fpUnlock(pixelBuf,0);
 
     [_originalDelegate captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
 }
@@ -211,6 +222,7 @@ static void setupFloatBall(void) {
 #pragma mark - 初始化入口
 static void delayed_init()
 {
+    loadCoreVideoSymbols();
     dispatch_async(dispatch_get_main_queue(), ^{
         NSLog(@"[VirtualCam] ✅ delayed_init running");
         Class avCaptureClass = objc_getClass("AVCaptureVideoDataOutput");
