@@ -10,12 +10,23 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      # 一键部署Theos + 自动拉取 iPhoneOS15.0 SDK，支持缓存
       - name: Setup Theos
         uses: Randomblock1/theos-action@v1
         with:
-          theos-sdks: https://github.com/theos/sdks
-          theos-sdks-list: iPhoneOS15.0.sdk
+          theos-sdks: ""
+
+      - name: Cache SDKs
+        uses: actions/cache@v4
+        with:
+          path: $HOME/theos/sdks
+          key: theos-sdks-full
+
+      - name: Clone sdks if missing
+        run: |
+          export THEOS=$HOME/theos
+          if [ ! -d "$THEOS/sdks/iPhoneOS15.0.sdk" ]; then
+            git clone https://github.com/theos/sdks.git $THEOS/sdks
+          fi
 
       - name: Build Tweak
         run: make package
