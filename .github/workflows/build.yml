@@ -14,25 +14,18 @@ jobs:
         run: |
           export THEOS=$HOME/theos
           rm -rf $THEOS
-          git clone --depth=1 https://github.com/theos/theos.git $THEOS
-          # 删除theos自带的空sdks目录，才能克隆sdks仓库
+          git clone --depth=1 --recursive https://github.com/theos/theos.git $THEOS
           rm -rf $THEOS/sdks
           git clone --depth=1 https://github.com/theos/sdks.git $THEOS/sdks
           brew install ldid make
 
-      - name: Compile Tweak
+      - name: Compile Tweak (ONLY DYLIB, NO DEB)
         run: |
           export THEOS=$HOME/theos
-          make package
+          make
 
       - name: Upload compiled dylib
         uses: actions/upload-artifact@v4
         with:
           name: FakeCamDylib
           path: .theos/obj/arm64/FakeCam.dylib
-
-      - name: Upload DEB package
-        uses: actions/upload-artifact@v4
-        with:
-          name: FakeCam_DEB
-          path: packages/*.deb
