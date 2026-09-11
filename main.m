@@ -13,6 +13,28 @@ static void swizzle(Class cls, SEL origSel, SEL newSel)
     method_exchangeImplementations(origMethod, newMethod);
 }
 
+// 判断当前界面是否是抖音拍摄页面
+static BOOL isCameraRecordingPage()
+{
+    UIWindow *keyWin = nil;
+    for(UIWindow *w in [UIApplication sharedApplication].windows)
+    {
+        if(w.isKeyWindow)
+        {
+            keyWin = w;
+            break;
+        }
+    }
+    if(!keyWin) return NO;
+    NSString *pageStr = [keyWin.rootViewController description];
+    // 拍摄页特征关键词
+    if([pageStr containsString:@"Recorder"] || [pageStr containsString:@"Capture"])
+    {
+        return YES;
+    }
+    return NO;
+}
+
 @interface CAMetalLayer (VCamHook)
 - (id<CAMetalDrawable>)vcam_nextDrawable;
 @end
@@ -22,11 +44,17 @@ static void swizzle(Class cls, SEL origSel, SEL newSel)
 {
     id<CAMetalDrawable> drawable = [self vcam_nextDrawable];
     if(!g_vcamEnable || !drawable) return drawable;
+    
+    // 增加页面判断：不是拍摄页面，直接返回，不渲染蓝色
+    if(!isCameraRecordingPage())
+    {
+        return drawable;
+    }
 
-    // ====== 核心过滤：只处理大于 400x400 的大画布（相机预览），小UI图层直接跳过 ======
     CGRect layerBounds = self.bounds;
     CGFloat w = layerBounds.size.width;
     CGFloat h = layerBounds.size.height;
+    // 同时保留尺寸过滤，过滤掉小UI金属图层
     if(w < 400 || h < 400)
     {
         return drawable;
@@ -40,7 +68,6 @@ static void swizzle(Class cls, SEL origSel, SEL newSel)
     MTLRenderPassDescriptor *rpd = [MTLRenderPassDescriptor renderPassDescriptor];
     rpd.colorAttachments[0].texture = tex;
     rpd.colorAttachments[0].loadAction = MTLLoadActionClear;
-    // 蓝色背景 RGBA
     rpd.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 1.0, 1.0);
     
     id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rpd];
