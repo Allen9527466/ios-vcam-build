@@ -1,4 +1,4 @@
-ARCHS = arm64 arm64e
+ARCHS = arm64
 TARGET = iphone:clang:15.0:15.0
 
 INSTALL_TARGET_PROCESSES = Aweme
@@ -9,7 +9,6 @@ DYLIB_NAME = VirtualCam
 
 VirtualCam_FILES = main.m
 VirtualCam_CFLAGS = -fobjc-arc
-# 增加 substrate 框架
-VirtualCam_FRAMEWORKS = CoreVideo UIKit AVFoundation Substrate
+VirtualCam_FRAMEWORKS = CoreVideo UIKit AVFoundation
 
 include $(THEOS_MAKE_PATH)/dylib.mk
