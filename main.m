@@ -4,7 +4,6 @@
 #import <CoreMedia/CoreMedia.h>
 #import <CoreVideo/CoreVideo.h>
 #import <MobileCoreServices/MobileCoreServices.h>
-#import <PhotosUI/PhotosUI.h>
 #import <objc/runtime.h>
 
 @interface GetFrame : NSObject
@@ -68,7 +67,7 @@ NSString *getSelectedVideoPath(void) {
 @end
 
 #pragma mark - 悬浮菜单窗口
-@interface CustomMenuWindow : UIWindow <UIGestureRecognizerDelegate, PHPickerViewControllerDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate>
+@interface CustomMenuWindow : UIWindow <UIGestureRecognizerDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate>
 @property (nonatomic, strong) UIButton *floatBtn;
 @property (nonatomic, weak) UIViewController *menuVC;
 @end
@@ -199,49 +198,17 @@ NSString *getSelectedVideoPath(void) {
 }
 
 - (void)pickVideo {
-    if (@available(iOS 14, *)) {
-        PHPickerConfiguration *config = [[PHPickerConfiguration alloc] init];
-        config.filter = [PHPickerFilter videosFilter];
-        config.selectionLimit = 1;
-        PHPickerViewController *picker = [[PHPickerViewController alloc] initWithConfiguration:config];
-        picker.delegate = self;
-        UIViewController *topVC = [UIApplication sharedApplication].keyWindow.rootViewController;
-        [topVC presentViewController:picker animated:YES completion:nil];
-    } else {
-        UIImagePickerController *picker = [[UIImagePickerController alloc] init];
-        picker.sourceType = UIImagePickerControllerSourceTypePhotoLibrary;
-        picker.mediaTypes = @[(NSString *)kUTTypeMovie];
-        picker.delegate = self;
-        UIViewController *topVC = [UIApplication sharedApplication].keyWindow.rootViewController;
-        [topVC presentViewController:picker animated:YES completion:nil];
-    }
+    UIImagePickerController *picker = [[UIImagePickerController alloc] init];
+    picker.sourceType = UIImagePickerControllerSourceTypePhotoLibrary;
+    picker.mediaTypes = @[(NSString *)kUTTypeMovie];
+    picker.delegate = self;
+    UIViewController *topVC = [UIApplication sharedApplication].keyWindow.rootViewController;
+    [topVC presentViewController:picker animated:YES completion:nil];
 }
 
 - (void)toggleReplace {
     g_replaceEnabled = !g_replaceEnabled;
     NSLog(@"[FakeTools] replace: %@", g_replaceEnabled ? @"ON" : @"OFF");
-}
-
-#pragma mark - PHPicker Delegate
-- (void)picker:(PHPickerViewController *)picker didFinishPicking:(NSArray<PHPickerResult *> *)results API_AVAILABLE(ios(14)) {
-    [picker dismissViewControllerAnimated:YES completion:nil];
-    PHPickerResult *result = results.firstObject;
-    if (!result) return;
-    
-    NSItemProvider *provider = result.itemProvider;
-    if ([provider hasItemConformingToTypeIdentifier:(NSString *)kUTTypeMovie]) {
-        [provider loadFileRepresentationForTypeIdentifier:(NSString *)kUTTypeMovie completionHandler:^(NSURL * _Nullable url, NSError * _Nullable error) {
-            if (url) {
-                NSString *tmpPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"vcam_selected.mp4"];
-                NSURL *tmpURL = [NSURL fileURLWithPath:tmpPath];
-                [[NSFileManager defaultManager] removeItemAtURL:tmpURL error:nil];
-                [[NSFileManager defaultManager] copyItemAtURL:url toURL:tmpURL error:nil];
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    g_selectedVideoPath = tmpPath;
-                });
-            }
-        }];
-    }
 }
 
 #pragma mark - UIImagePicker Delegate
