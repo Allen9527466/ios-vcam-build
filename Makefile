@@ -7,7 +7,7 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = FakeCam
 
-FakeCam_FILES = Tweak.x
+FakeCam_FILES = main.m
 FakeCam_CFLAGS = -fobjc-arc
 
 include $(THEOS_MAKE_PATH)/tweak.mk
