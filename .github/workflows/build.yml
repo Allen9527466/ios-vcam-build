@@ -14,15 +14,16 @@ jobs:
         run: |
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
           echo "SDK_PATH=$SDK_PATH" >> $GITHUB_ENV
+
           xcrun clang -arch arm64 \
           -isysroot $SDK_PATH \
-          -mios-version-min=15.0 \
+          -mios-version-min=14.0 \
           -fobjc-arc \
           -c main.m -o main_arm64.o
-          
+
           xcrun clang -arch arm64 \
           -isysroot $SDK_PATH \
-          -mios-version-min=15.0 \
+          -mios-version-min=14.0 \
           -fobjc-arc \
           -dynamiclib main_arm64.o \
           -o libVirtualCam.dylib \
@@ -31,7 +32,6 @@ jobs:
           -framework CoreMedia \
           -framework CoreVideo \
           -framework Foundation \
-          -framework Metal \
           -framework QuartzCore \
           -framework CoreGraphics
 
