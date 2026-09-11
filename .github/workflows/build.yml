@@ -1,33 +1,36 @@
-name: Build FakeCam Dylib FINAL
+name: Build FakeCam Tweak
 on:
   push:
-  workflow_dispatch:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout source code
-        uses: actions/checkout@v4
+    - name: Checkout source
+      uses: actions/checkout@v4
 
-      - name: Setup Theos Full Env
-        run: |
-          export THEOS=$HOME/theos
-          rm -rf $THEOS
-          # 递归克隆theos + 全部子模块（vendor/dm.pl）
-          git clone --depth=1 --recursive https://github.com/theos/theos.git $THEOS
-          rm -rf $THEOS/sdks
-          # 拉取官方sdks仓库，包含 iPhoneOS15.6.sdk
-          git clone --depth=1 https://github.com/theos/sdks.git $THEOS/sdks
-          brew install ldid make
+    - name: Setup Theos
+      uses: theos/setup-theos@v1
+      with:
+        theos-version: latest
 
-      - name: Compile ONLY DYLIB (Skip DEB package)
-        run: |
-          export THEOS=$HOME/theos
-          make
+    - name: Build Tweak
+      shell: bash
+      run: |
+        export THEOS=$HOME/theos
+        set -x
+        # 不截断clang输出，打印全部编译信息
+        make clean
+        make TARGET=iphone:clang:latest:14.0 2>&1 | tee build_log.txt
 
-      - name: Upload compiled FakeCam.dylib
-        uses: actions/upload-artifact@v4
-        with:
-          name: FakeCamDylib_Final
-          path: .theos/obj/arm64/FakeCam.dylib
+    - name: Show full compile log
+      run: cat build_log.txt
+
+    - name: Upload dylib artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: FakeCam-Dylib
+        path: .theos/obj/debug/arm64/FakeCam.dylib
