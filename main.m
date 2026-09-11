@@ -5,33 +5,30 @@
 #include <objc/runtime.h>
 #include <dlfcn.h>
 
-typedef void* CVPixelBufferRef;
+// 全部用void*，不再定义CVPixelBufferRef
+typedef void (*LockFunc)(void*, int);
+typedef void (*UnlockFunc)(void*, int);
+typedef void* (*GetBaseAddrFunc)(void*);
+typedef size_t (*GetBPRFunc)(void*);
+typedef size_t (*GetHeightFunc)(void*);
 
-typedef void (*CVPixelBufferLockBaseAddressFunc)(CVPixelBufferRef, int);
-typedef void (*CVPixelBufferUnlockBaseAddressFunc)(CVPixelBufferRef, int);
-typedef void* (*CVPixelBufferGetBaseAddressFunc)(CVPixelBufferRef);
-typedef size_t (*CVPixelBufferGetBytesPerRowFunc)(CVPixelBufferRef);
-typedef size_t (*CVPixelBufferGetHeightFunc)(CVPixelBufferRef);
+static LockFunc fpLock = NULL;
+static UnlockFunc fpUnlock = NULL;
+static GetBaseAddrFunc fpBaseAddr = NULL;
+static GetBPRFunc fpBPR = NULL;
+static GetHeightFunc fpHeight = NULL;
 
-static CVPixelBufferLockBaseAddressFunc fpLock = NULL;
-static CVPixelBufferUnlockBaseAddressFunc fpUnlock = NULL;
-static CVPixelBufferGetBaseAddressFunc fpBaseAddr = NULL;
-static CVPixelBufferGetBytesPerRowFunc fpBPR = NULL;
-static CVPixelBufferGetHeightFunc fpHeight = NULL;
-
-static void loadCoreVideoSymbols(void)
+static void loadCV(void)
 {
-    void *cvHandle = dlopen("/System/Library/Frameworks/CoreVideo.framework/CoreVideo", RTLD_LAZY);
-    if (!cvHandle) return;
-
-    fpLock = dlsym(cvHandle, "CVPixelBufferLockBaseAddress");
-    fpUnlock = dlsym(cvHandle, "CVPixelBufferUnlockBaseAddress");
-    fpBaseAddr = dlsym(cvHandle, "CVPixelBufferGetBaseAddress");
-    fpBPR = dlsym(cvHandle, "CVPixelBufferGetBytesPerRow");
-    fpHeight = dlsym(cvHandle, "CVPixelBufferGetHeight");
+    void *h = dlopen("/System/Library/Frameworks/CoreVideo.framework/CoreVideo", RTLD_LAZY);
+    if(!h) return;
+    fpLock = dlsym(h, "CVPixelBufferLockBaseAddress");
+    fpUnlock = dlsym(h, "CVPixelBufferUnlockBaseAddress");
+    fpBaseAddr = dlsym(h, "CVPixelBufferGetBaseAddress");
+    fpBPR = dlsym(h, "CVPixelBufferGetBytesPerRow");
+    fpHeight = dlsym(h, "CVPixelBufferGetHeight");
 }
 
-// ========== 前置声明 ==========
 @class FloatBallTarget;
 void showVirtualCamPanel(void);
 static UIViewController* getTopViewController(void);
@@ -39,12 +36,10 @@ static UIViewController* getTopViewController(void);
 @interface NSObject (HookAdditions)
 - (void)hook_setSampleBufferDelegate:(id)delegate queue:(dispatch_queue_t)queue;
 @end
-
 @implementation NSObject (HookAdditions)
 - (void)hook_setSampleBufferDelegate:(id)delegate queue:(dispatch_queue_t)queue {}
 @end
 
-#pragma mark - 全局状态
 static BOOL g_virtualCamEnable = NO;
 static UIWindow *_floatWindow;
 static FloatBallTarget *floatTarget;
@@ -52,198 +47,132 @@ static FloatBallTarget *floatTarget;
 @interface FloatBallTarget : NSObject
 @end
 @implementation FloatBallTarget
-- (void)floatBallTap:(UIButton *)sender {
-    showVirtualCamPanel();
-}
+- (void)floatBallTap:(UIButton *)sender { showVirtualCamPanel(); }
 @end
 
-#pragma mark - 获取顶层ViewController（iOS13+ Scene兼容）
 static UIViewController* getTopViewController(void)
 {
     UIViewController *topVC = nil;
-    UIWindowScene *scene = nil;
-    for (UIWindowScene *s in [UIApplication sharedApplication].connectedScenes) {
-        if (s.activationState == UISceneActivationStateForegroundActive) {
-            scene = s;
+    for(UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes){
+        if(scene.activationState == UISceneActivationStateForegroundActive){
+            UIWindow *win = scene.windows.firstObject;
+            topVC = win.rootViewController;
+            while(topVC.presentedViewController) topVC = topVC.presentedViewController;
             break;
         }
-    }
-    if (!scene) return nil;
-    UIWindow *win = scene.windows.firstObject;
-    topVC = win.rootViewController;
-    while (topVC.presentedViewController) {
-        topVC = topVC.presentedViewController;
     }
     return topVC;
 }
 
-#pragma mark - 帧代理
-@interface VirtualCamProxyDelegate : NSObject <AVCaptureVideoDataOutputSampleBufferDelegate>
-@property (nonatomic, strong) id<AVCaptureVideoDataOutputSampleBufferDelegate> originalDelegate;
+@interface VirtualCamProxyDelegate : NSObject
+@property (nonatomic, strong) id originalDelegate;
 @end
-
 @implementation VirtualCamProxyDelegate
-- (instancetype)initWithOrig:(id<AVCaptureVideoDataOutputSampleBufferDelegate>)orig {
+- (instancetype)initWithOrig:(id)orig {
     self = [super init];
-    if(self) {
-        _originalDelegate = orig;
-    }
+    if(self) _originalDelegate = orig;
     return self;
 }
-
-- (void)captureOutput:(AVCaptureVideoDataOutput *)output didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer fromConnection:(AVCaptureConnection *)connection {
+- (void)captureOutput:(id)output didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer fromConnection:(id)connection {
     if (!g_virtualCamEnable || !fpLock) {
         [_originalDelegate captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
         return;
     }
-
-    CVPixelBufferRef pixelBuf = CMSampleBufferGetImageBuffer(sampleBuffer);
+    // 返回值直接存入void*，不再写CVPixelBufferRef
+    void *pixelBuf = CMSampleBufferGetImageBuffer(sampleBuffer);
     if (!pixelBuf) {
         [_originalDelegate captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
         return;
     }
-
     fpLock(pixelBuf,0);
-    void *baseAddr = fpBaseAddr(pixelBuf);
-    size_t bytesPerRow = fpBPR(pixelBuf);
-    size_t height = fpHeight(pixelBuf);
-
-    // BGRA 蓝色填充
-    for(size_t y = 0; y < height; y++){
-        uint8_t *row = (uint8_t*)baseAddr + y * bytesPerRow;
-        for(size_t x = 0; x < bytesPerRow; x +=4){
-            row[x+0] = 255;
-            row[x+1] = 0;
-            row[x+2] = 0;
-            row[x+3] = 255;
+    uint8_t *base = fpBaseAddr(pixelBuf);
+    size_t bpr = fpBPR(pixelBuf);
+    size_t h = fpHeight(pixelBuf);
+    for(size_t y=0;y<h;y++){
+        uint8_t *row = base + y*bpr;
+        for(size_t x=0;x<bpr;x+=4){
+            row[x+0]=255; row[x+1]=0; row[x+2]=0; row[x+3]=255;
         }
     }
     fpUnlock(pixelBuf,0);
-
     [_originalDelegate captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
 }
 @end
 
-id VirtualCamProxyDelegate_alloc(id orig) {
-    return [[VirtualCamProxyDelegate alloc] initWithOrig:orig];
-}
+id proxyAlloc(id orig) { return [[VirtualCamProxyDelegate alloc] initWithOrig:orig]; }
 
-#pragma mark - swizzle工具
-static void safe_swizzle(Class cls, SEL origSel, SEL newSel)
+static void swizzle(Class cls, SEL orig, SEL new)
 {
-    if (!cls) return;
-    Method origMethod = class_getInstanceMethod(cls, origSel);
-    Method newMethod = class_getInstanceMethod(cls, newSel);
-    if (!origMethod || !newMethod) return;
-    BOOL addOK = class_addMethod(cls, origSel, method_getImplementation(newMethod), method_getTypeEncoding(newMethod));
-    if(addOK){
-        class_replaceMethod(cls, newSel, method_getImplementation(origMethod), method_getTypeEncoding(origMethod));
-    }else{
-        method_exchangeImplementations(origMethod, newMethod);
-    }
+    Method mOrig = class_getInstanceMethod(cls, orig);
+    Method mNew = class_getInstanceMethod(cls, new);
+    BOOL ok = class_addMethod(cls, orig, method_getImplementation(mNew), method_getTypeEncoding(mNew));
+    if(ok) class_replaceMethod(cls, new, method_getImplementation(mOrig), method_getTypeEncoding(mOrig));
+    else method_exchangeImplementations(mOrig,mNew);
 }
 
-#pragma mark - Hook setSampleBufferDelegate
 static void hook_setSampleBufferDelegate(id self, SEL _cmd, id delegate, dispatch_queue_t queue)
 {
-    NSLog(@"[VirtualCam] ✅ hook_setSampleBufferDelegate 触发");
     if(delegate){
-        id proxy = VirtualCamProxyDelegate_alloc(delegate);
-        [self hook_setSampleBufferDelegate:proxy queue:queue];
-        objc_setAssociatedObject(self, @"vc_proxy", proxy, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        id p = proxyAlloc(delegate);
+        [self hook_setSampleBufferDelegate:p queue:queue];
+        objc_setAssociatedObject(self, @"vc_proxy", p, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }else{
         [self hook_setSampleBufferDelegate:nil queue:queue];
         objc_setAssociatedObject(self, @"vc_proxy", nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
 }
 
-#pragma mark - 虚拟相机弹窗面板
 void showVirtualCamPanel(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        UIViewController *topVC = getTopViewController();
-        if (!topVC) return;
-
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"虚拟相机【测试模式‑蓝色画面】"
-                                                                         message:@"点击开启，摄像头画面填充蓝色\n出现蓝色即代表Hook链路正常"
-                                                                  preferredStyle:UIAlertControllerStyleAlert];
-
-        UIAlertAction *actionEnable = [UIAlertAction actionWithTitle:@"✅开启虚拟相机" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-            g_virtualCamEnable = YES;
-            NSLog(@"[VirtualCam] ✅ 测试模式开启，画面填充蓝色");
-        }];
-
-        UIAlertAction *actionDisable = [UIAlertAction actionWithTitle:@"❌关闭虚拟相机" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-            g_virtualCamEnable = NO;
-            NSLog(@"[VirtualCam] ✅ 关闭，恢复真实摄像头");
-        }];
-
-        UIAlertAction *cancel = [UIAlertAction actionWithTitle:@"关闭弹窗" style:UIAlertActionStyleCancel handler:nil];
-        [alert addAction:actionEnable];
-        [alert addAction:actionDisable];
-        [alert addAction:cancel];
-        [topVC presentViewController:alert animated:YES completion:nil];
+        UIViewController *vc = getTopViewController();
+        if(!vc) return;
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"虚拟相机" message:@"开启后画面填充蓝色" preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"✅开启" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){g_virtualCamEnable=YES;}]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"❌关闭" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){g_virtualCamEnable=NO;}]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+        [vc presentViewController:alert animated:YES completion:nil];
     });
 }
 
-#pragma mark - 悬浮球
-static void setupFloatBall(void) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (_floatWindow) {
-            NSLog(@"[FloatBall] 悬浮窗口已经存在，跳过创建");
-            return;
-        }
-
-        CGFloat ballSize = 50;
-        CGRect frame = CGRectMake([UIScreen mainScreen].bounds.size.width - ballSize - 20, 200, ballSize, ballSize);
-
-        _floatWindow = [[UIWindow alloc] initWithFrame:frame];
-        _floatWindow.windowLevel = UIWindowLevelAlert + 100;
-        _floatWindow.backgroundColor = [UIColor clearColor];
-
-        UIButton *floatBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-        floatBtn.frame = _floatWindow.bounds;
-        floatBtn.layer.cornerRadius = ballSize/2;
-        floatBtn.clipsToBounds = YES;
-        floatBtn.backgroundColor = [UIColor colorWithRed:0.22 green:0.48 blue:1 alpha:0.9];
-        [floatBtn setTitle:@"VC" forState:UIControlStateNormal];
-        [floatBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        floatBtn.titleLabel.font = [UIFont boldSystemFontOfSize:14];
-
-        [floatBtn addTarget:floatTarget action:@selector(floatBallTap:) forControlEvents:UIControlEventTouchUpInside];
-
-        _floatWindow.rootViewController = [[UIViewController alloc] init];
-        [_floatWindow.rootViewController.view addSubview:floatBtn];
-        _floatWindow.hidden = NO;
-
-        NSLog(@"[FloatBall] ✅ 悬浮球创建完成");
-    });
-}
-
-#pragma mark - 初始化入口
-static void delayed_init()
+static void createFloatBall(void)
 {
-    loadCoreVideoSymbols();
     dispatch_async(dispatch_get_main_queue(), ^{
-        NSLog(@"[VirtualCam] ✅ delayed_init running");
-        Class avCaptureClass = objc_getClass("AVCaptureVideoDataOutput");
-        if(avCaptureClass){
-            safe_swizzle(avCaptureClass, @selector(setSampleBufferDelegate:queue:), @selector(hook_setSampleBufferDelegate:queue:));
-            NSLog(@"[VirtualCam] ✅ Hook AVCaptureVideoDataOutput success");
-        }else{
-            NSLog(@"[VirtualCam] ❌ AVCaptureVideoDataOutput not found");
-        }
+        if(_floatWindow) return;
+        CGFloat sz = 50;
+        CGRect r = CGRectMake([UIScreen mainScreen].bounds.size.width-sz-20, 200, sz, sz);
+        _floatWindow = [[UIWindow alloc] initWithFrame:r];
+        _floatWindow.windowLevel = UIWindowLevelAlert+100;
+        _floatWindow.backgroundColor = [UIColor clearColor];
+        UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
+        btn.frame = _floatWindow.bounds;
+        btn.layer.cornerRadius = sz/2;
+        btn.clipsToBounds = YES;
+        btn.backgroundColor = [UIColor systemBlueColor];
+        [btn setTitle:@"VC" forState:UIControlStateNormal];
+        [btn addTarget:floatTarget action:@selector(floatBallTap:) forControlEvents:UIControlEventTouchUpInside];
+        _floatWindow.rootViewController = [UIViewController new];
+        [_floatWindow.rootViewController.view addSubview:btn];
+        _floatWindow.hidden = NO;
+    });
+}
 
+static void delayedInit()
+{
+    loadCV();
+    dispatch_async(dispatch_get_main_queue(), ^{
+        Class cls = objc_getClass("AVCaptureVideoDataOutput");
+        if(cls) swizzle(cls, @selector(setSampleBufferDelegate:queue:), @selector(hook_setSampleBufferDelegate:queue:));
         floatTarget = [[FloatBallTarget alloc] init];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            setupFloatBall();
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            createFloatBall();
         });
     });
 }
 
 __attribute__((constructor))
-static void init_plugin() {
-    NSLog(@"[VirtualCam] ✅ Dylib loaded — TrollFools ready【测试蓝色帧】");
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        delayed_init();
+static void pluginLoad()
+{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        delayedInit();
     });
 }
