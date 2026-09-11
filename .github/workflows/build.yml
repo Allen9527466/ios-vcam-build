@@ -1,4 +1,4 @@
-name: Build Pure ObjC VirtualCam dylib arm64 only
+name: Build Pure ObjC VirtualCam dylib arm64
 on:
   push:
     branches: [ main ]
@@ -16,17 +16,29 @@ jobs:
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
           echo "SDK_PATH=$SDK_PATH" >> $GITHUB_ENV
 
-      - name: Compile arm64 ONLY
+      - name: Compile & Link
         run: |
-          xcrun clang -arch arm64 -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -fobjc-arc -c main.m -o main_arm64.o
-          xcrun clang -arch arm64 -isysroot ${{ env.SDK_PATH }} -mios-version-min=15.0 -fobjc-arc -dynamiclib main_arm64.o -o libVirtualCam.dylib -framework UIKit -framework AVFoundation -framework CoreMedia -framework Foundation
+          SDK_PATH=${{ env.SDK_PATH }}
+          xcrun clang -arch arm64 \
+          -isysroot $SDK_PATH \
+          -mios-version-min=15.0 \
+          -fobjc-arc \
+          -c main.m -o main_arm64.o
 
-      - name: lipo check arch
-        run: |
-          xcrun lipo -info libVirtualCam.dylib
+          xcrun clang -arch arm64 \
+          -isysroot $SDK_PATH \
+          -mios-version-min=15.0 \
+          -fobjc-arc \
+          -dynamiclib main_arm64.o \
+          -o libVirtualCam.dylib \
+          -framework UIKit \
+          -framework AVFoundation \
+          -framework CoreMedia \
+          -framework CoreVideo \
+          -framework Foundation
 
-      - name: Upload
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: virtualcam-dylib-arm64
+          name: VirtualCam-dylib
           path: libVirtualCam.dylib
