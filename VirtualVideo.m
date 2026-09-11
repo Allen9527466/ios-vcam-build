@@ -11,7 +11,6 @@ static AVAssetReader *g_assetReader = nil;
 static dispatch_queue_t g_videoQueue = nil;
 static IMP origCaptureOutputImp = NULL;
 
-// ========= 对外导出C接口，给你原来的CustomMenuView UI直接调用 =========
 __attribute__((visibility("default")))
 void setVirtualVideoEnabled(BOOL enabled) {
     g_replaceEnabled = enabled;
@@ -40,7 +39,6 @@ NSString *getSelectedVideoPath(void) {
     return g_selectedVideoURL.path;
 }
 
-// ========= 内部视频处理 =========
 static CMSampleBufferRef createBlackSampleBuffer(CMSampleBufferRef originalBuffer) {
     if (!originalBuffer) return NULL;
     CVPixelBufferRef pixelBuffer = CMSampleBufferGetImageBuffer(originalBuffer);
@@ -77,34 +75,55 @@ static CMSampleBufferRef createBlackSampleBuffer(CMSampleBufferRef originalBuffe
     return sbOut;
 }
 
+static void resetAssetReader(void) {
+    if(!g_selectedVideoURL) return;
+    AVAsset *asset = [AVAsset assetWithURL:g_selectedVideoURL];
+    AVAssetTrack *track = [[asset.tracks filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"mediaType == %@",AVMediaTypeVideo]] firstObject];
+    if(!track) return;
+    NSDictionary *outSetting = @{(id)kCVPixelBufferPixelFormatTypeKey:@(kCVPixelFormatType_32BGRA)};
+    NSError *err;
+    g_assetReader = [[AVAssetReader alloc] initWithAsset:asset error:&err];
+    if(!g_assetReader || err) return;
+    AVAssetReaderTrackOutput *out = [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:track outputSettings:outSetting];
+    [g_assetReader addOutput:out];
+    [g_assetReader startReading];
+}
+
 static CMSampleBufferRef readNextVideoFrame(void) {
     if(!g_selectedVideoURL) return NULL;
-    if(!g_assetReader){
-        AVAsset *asset = [AVAsset assetWithURL:g_selectedVideoURL];
-        AVAssetTrack *track = [[asset.tracks filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"mediaType == %@",AVMediaTypeVideo]] firstObject];
-        if(!track) return NULL;
-        NSDictionary *outSetting = @{(id)kCVPixelBufferPixelFormatTypeKey:@(kCVPixelFormatType_32BGRA)};
-        NSError *err;
-        g_assetReader = [[AVAssetReader alloc] initWithAsset:asset error:&err];
-        if(!g_assetReader || err) return NULL;
-        AVAssetReaderTrackOutput *out = [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:track outputSettings:outSetting];
-        [g_assetReader addOutput:out];
-        [g_assetReader startReading];
-    }
-    AVAssetReaderTrackOutput *out = g_assetReader.outputs.firstObject;
-    CMSampleBufferRef buf = [out copyNextSampleBuffer];
-    if(!buf){
-        [g_assetReader cancelReading];
-        g_assetReader = nil;
-    }
+    
+    __block CMSampleBufferRef buf = NULL;
+    dispatch_sync(g_videoQueue, ^{
+        if(!g_assetReader){
+            resetAssetReader();
+        }
+        if(!g_assetReader) return;
+        
+        AVAssetReaderTrackOutput *out = g_assetReader.outputs.firstObject;
+        buf = [out copyNextSampleBuffer];
+        
+        if(!buf){
+            // 视频读完，循环播放：立即重置 reader 再读一帧
+            [g_assetReader cancelReading];
+            g_assetReader = nil;
+            resetAssetReader();
+            if(g_assetReader){
+                AVAssetReaderTrackOutput *out2 = g_assetReader.outputs.firstObject;
+                buf = [out2 copyNextSampleBuffer];
+            }
+        }
+    });
     return buf;
 }
 
 static void vcam_captureOutput(id self, SEL _cmd, AVCaptureOutput *output, CMSampleBufferRef sampleBuffer, AVCaptureConnection *connection) {
+    NSLog(@"[VirtualVideo] captureOutput called, replace=%d", g_replaceEnabled);
+    
     if (!g_replaceEnabled || !g_selectedVideoURL) {
         ((void(*)(id,SEL,id,CMSampleBufferRef,id))origCaptureOutputImp)(self,_cmd,output,sampleBuffer,connection);
         return;
     }
+    
     CMSampleBufferRef newFrame = readNextVideoFrame();
     if(newFrame){
         ((void(*)(id,SEL,id,CMSampleBufferRef,id))origCaptureOutputImp)(self,_cmd,output,newFrame,connection);
@@ -112,7 +131,7 @@ static void vcam_captureOutput(id self, SEL _cmd, AVCaptureOutput *output, CMSam
     }else{
         CMSampleBufferRef black = createBlackSampleBuffer(sampleBuffer);
         if(black){
-            ((void(*)(id,SEL,id,CMSampleBufferRef,id))origCaptureOutputImp)(self,_cmd,output,sampleBuffer,connection);
+            ((void(*)(id,SEL,id,CMSampleBufferRef,id))origCaptureOutputImp)(self,_cmd,output,black,connection);
             CFRelease(black);
         }else{
             ((void(*)(id,SEL,id,CMSampleBufferRef,id))origCaptureOutputImp)(self,_cmd,output,sampleBuffer,connection);
@@ -120,7 +139,6 @@ static void vcam_captureOutput(id self, SEL _cmd, AVCaptureOutput *output, CMSam
     }
 }
 
-// 初始化Hook，**把这个调用放到你原来项目已有的constructor入口里面，不要新建__attribute__((constructor))**
 void virtualVideoSetupHook(void)
 {
     @autoreleasepool {
