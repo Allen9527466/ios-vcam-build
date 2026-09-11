@@ -23,6 +23,7 @@
 }
 
 + (CMSampleBufferRef)replaceSampleBuffer:(CMSampleBufferRef)sampleBuffer mirror:(BOOL)mirror {
+    // 当前占位，后续写视频解码在这里，直接返回原帧
     return sampleBuffer;
 }
 
@@ -66,7 +67,7 @@ NSString *getSelectedVideoPath(void) {
 
 @end
 
-#pragma mark - 悬浮菜单窗口
+#pragma mark - 悬浮菜单窗口（纯UIWindow实现，兼容iOS14，无UIWindowScene）
 @interface CustomMenuWindow : UIWindow <UIGestureRecognizerDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate>
 @property (nonatomic, strong) UIButton *floatBtn;
 @property (nonatomic, weak) UIViewController *menuVC;
@@ -75,19 +76,7 @@ NSString *getSelectedVideoPath(void) {
 @implementation CustomMenuWindow
 
 - (instancetype)init {
-    UIWindowScene *scene = nil;
-    for (UIWindowScene *s in [UIApplication sharedApplication].connectedScenes) {
-        if (s.activationState == UISceneActivationStateForegroundActive) {
-            scene = s;
-            break;
-        }
-    }
-    if (scene) {
-        self = [super initWithWindowScene:scene];
-    } else {
-        self = [super init];
-    }
-    
+    self = [super init];
     if (self) {
         CGFloat btnSize = 44;
         self.frame = CGRectMake(30, 300, btnSize, btnSize);
@@ -235,7 +224,6 @@ static void fakeToolsEntry(void) {
         
         [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidFinishLaunchingNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
             NSLog(@"FakeTools app launched, init UI + hook");
-            
             g_menuWin = [[CustomMenuWindow alloc] init];
             
             Class cls = objc_getClass("AVCaptureOutput");
