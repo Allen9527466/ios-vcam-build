@@ -22,55 +22,55 @@ static void swizzle(Class cls, SEL origSel, SEL newSel)
 
 - (void)vcam_captureOutput:(AVCaptureOutput *)output didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer fromConnection:(AVCaptureConnection *)connection
 {
-    [self vcam_captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
-    
-    if (!g_vcamEnable) return;
-    if (!CMSampleBufferIsValid(sampleBuffer)) return;
+    if (!g_vcamEnable)
+    {
+        // 关闭状态，直接放行原始画面
+        [self vcam_captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
+        return;
+    }
     
     CVPixelBufferRef pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer);
-    if (!pixelBuffer) return;
-    
-    CVPixelBufferLockBaseAddress(pixelBuffer, 0);
-    OSType format = CVPixelBufferGetPixelFormatType(pixelBuffer);
-    size_t width  = CVPixelBufferGetWidth(pixelBuffer);
+    if (!pixelBuffer)
+    {
+        [self vcam_captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
+        return;
+    }
+
+    size_t width = CVPixelBufferGetWidth(pixelBuffer);
     size_t height = CVPixelBufferGetHeight(pixelBuffer);
 
-    if (format == kCVPixelFormatType_32BGRA)
-    {
-        void *baseAddr = CVPixelBufferGetBaseAddress(pixelBuffer);
-        size_t stride = CVPixelBufferGetBytesPerRow(pixelBuffer);
-        uint32_t *ptr = (uint32_t *)baseAddr;
-        for(size_t y = 0; y < height; y++){
-            uint32_t *row = ptr + (y * stride / 4);
-            for(size_t x = 0; x < width; x++){
-                row[x] = 0xFFFF0000;
-            }
-        }
-    }
-    else if (format == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange || format == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange)
-    {
-        void *yBase = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 0);
-        void *uvBase = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 1);
-        size_t yStride = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0);
-        size_t uvStride = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 1);
+    CVPixelBufferRef newPixelBuffer = NULL;
+    CVPixelBufferCreate(NULL, width, height, kCVPixelFormatType_32BGRA, NULL, &newPixelBuffer);
+    CVPixelBufferLockBaseAddress(newPixelBuffer, 0);
+    void *baseAddr = CVPixelBufferGetBaseAddress(newPixelBuffer);
+    size_t bytesPerRow = CVPixelBufferGetBytesPerRow(newPixelBuffer);
 
-        uint8_t *yPtr = (uint8_t *)yBase;
-        for(size_t y = 0; y < height; y++){
-            uint8_t *row = yPtr + y * yStride;
-            memset(row, 128, width);
+    // BGRA 蓝色：B=255 G=0 R=0 A=255
+    uint8_t *p = (uint8_t *)baseAddr;
+    for(size_t y=0; y<height; y++){
+        for(size_t x=0; x<width*4; x+=4){
+            p[x+0] = 255;
+            p[x+1] = 0;
+            p[x+2] = 0;
+            p[x+3] = 255;
         }
-        uint8_t *uvPtr = (uint8_t *)uvBase;
-        size_t uvHeight = height / 2;
-        for(size_t y = 0; y < uvHeight; y++){
-            uint8_t *row = uvPtr + y * uvStride;
-            for(size_t x = 0; x < width; x += 2){
-                row[x] = 255;
-                row[x+1] = 128;
-            }
-        }
+        p += bytesPerRow;
     }
+    CVPixelBufferUnlockBaseAddress(newPixelBuffer,0);
 
-    CVPixelBufferUnlockBaseAddress(pixelBuffer,0);
+    CMSampleBufferRef newSampleBuffer = NULL;
+    CMVideoFormatDescriptionRef fmtDesc = NULL;
+    CMVideoFormatDescriptionCreateForImageBuffer(NULL, newPixelBuffer, &fmtDesc);
+
+    CMSampleTimingInfo timing;
+    CMSampleBufferGetSampleTimingInfo(sampleBuffer,0,&timing);
+    CMSampleBufferCreateForImageBuffer(NULL, newPixelBuffer, YES, NULL, NULL, fmtDesc, &timing, &newSampleBuffer);
+
+    [self vcam_captureOutput:output didOutputSampleBuffer:newSampleBuffer fromConnection:connection];
+
+    CFRelease(newSampleBuffer);
+    CFRelease(fmtDesc);
+    CVPixelBufferRelease(newPixelBuffer);
 }
 
 @end
@@ -104,7 +104,7 @@ static void swizzle(Class cls, SEL origSel, SEL newSel)
 - (void)tapBtn
 {
     g_vcamEnable = !g_vcamEnable;
-    NSLog(@"VirtualCam: %@", g_vcamEnable ? @"ON" : @"OFF");
+    NSLog(@"VirtualCam toggle: %@", g_vcamEnable ? @"ON" : @"OFF");
     self.backgroundColor = g_vcamEnable ? [UIColor systemRedColor] : [UIColor systemBlueColor];
 }
 @end
