@@ -9,22 +9,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Theos
+      - name: Build & Compile
         run: |
-          git clone --recursive https://github.com/theos/theos ~/theos
-          echo "export THEOS=$HOME/theos" >> ~/.zshrc
-          source ~/.zshrc
+          # 一次性全部在同一个shell执行，环境变量不会丢失
+          export THEOS=$HOME/theos
+          git clone --recursive https://github.com/theos/theos $THEOS
           brew install ldid
-
-      - name: Download iPhoneOS14.0 SDK
-        run: |
+          
+          # 下载SDK
+          mkdir -p $THEOS/sdks
           cd $THEOS/sdks
           curl -L https://github.com/theos/sdks/raw/master/iPhoneOS14.0.sdk.tar.xz -o sdk.tar.xz
           tar -xf sdk.tar.xz
-
-      - name: Compile Tweak
-        run: |
-          source ~/.zshrc
+          
+          # 回到源码目录编译
+          cd $GITHUB_WORKSPACE
           make package
 
       - name: Upload Dylib Artifact
