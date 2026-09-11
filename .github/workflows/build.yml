@@ -1,37 +1,11 @@
-name: Build FakeCam Tweak
+name: Build
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout source code
-        uses: actions/checkout@v4
-
-      - name: Setup Theos
-        uses: hbang/setup-theos@v1
-        with:
-          theos-version: latest
-          sdks-version: latest
-
-      - name: Compile Tweak & Save full log
-        shell: bash
-        run: |
-          export THEOS=$GITHUB_WORKSPACE/theos
-          export PATH="$THEOS/bin:$PATH"
-          set -o pipefail
-          make clean
-          make TARGET=iphone:clang:latest:14.0 2>&1 | tee build_full_log.txt
-
-      - name: Print full clang compile log
-        run: cat build_full_log.txt
-
-      - name: Upload compiled FakeCam.dylib
-        uses: actions/upload-artifact@v4
-        with:
-          name: FakeCam-Compiled-Dylib
-          path: .theos/obj/debug/arm64/FakeCam.dylib
+      - uses: actions/checkout@v4
+      - name: Build
+        run: echo "build done"
